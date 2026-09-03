@@ -1,0 +1,49 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-decision-map-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # config/app.env는 저장소에 없으며 서버의 기존 비밀 설정을 보존합니다.
+      - name: Copy sources to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.BACKEND_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "."
+          target: /home/${{ secrets.SERVER_USER }}/ai-decision-map
+          rm: false
+          overwrite: true
+
+      - name: Rebuild and restart
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BACKEND_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 25m
+          script: |
+            set -eu
+            cd /home/${{ secrets.SERVER_USER }}/ai-decision-map
+            test -f config/app.env || { echo "config/app.env 없음 — docs/DEPLOY.md 참고"; exit 1; }
+            docker compose --env-file config/app.env -f docker-compose.prd.yml config --quiet
+            docker compose --env-file config/app.env -f docker-compose.prd.yml build
+            docker compose --env-file config/app.env -f docker-compose.prd.yml up -d
+            curl --fail --retry 12 --retry-connrefused --retry-delay 5 --max-time 10 http://127.0.0.1:8013/api/v1/health
+            curl --fail --retry 12 --retry-connrefused --retry-delay 5 --max-time 10 --output /dev/null http://127.0.0.1:3007/

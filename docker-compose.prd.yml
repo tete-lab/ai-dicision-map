@@ -1,0 +1,56 @@
+name: ai-decision-map
+
+# 운영 서버용 구성. 외부 공개는 호스트 Nginx가 담당하며 컨테이너 포트는 localhost에만 바인딩합니다.
+services:
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      MYSQL_URL: ${MYSQL_URL:?MYSQL_URL is required}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:?MYSQL_USERNAME is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CONVERSATION_MODEL: ${LLM_CONVERSATION_MODEL:-gpt-5.6-luna}
+      LLM_NARRATIVE_MODEL: ${LLM_NARRATIVE_MODEL:-gpt-5.6-terra}
+      LLM_CONVERSATION_REASONING_EFFORT: ${LLM_CONVERSATION_REASONING_EFFORT:-none}
+      LLM_NARRATIVE_REASONING_EFFORT: ${LLM_NARRATIVE_REASONING_EFFORT:-low}
+      LLM_PROMPT_VERSION: ${LLM_PROMPT_VERSION:-decision-coach-v4}
+      LLM_CONVERSATION_MAX_OUTPUT_TOKENS: ${LLM_CONVERSATION_MAX_OUTPUT_TOKENS:-3500}
+      LLM_NARRATIVE_MAX_OUTPUT_TOKENS: ${LLM_NARRATIVE_MAX_OUTPUT_TOKENS:-3500}
+    ports:
+      - "127.0.0.1:8013:8013"
+    networks:
+      - decision-map
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # 같은 도메인의 Nginx가 /api를 프록시하므로 운영값은 비워둡니다.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL-}
+    restart: unless-stopped
+    environment:
+      PORT: 3007
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3007:3007"
+    networks:
+      - decision-map
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  decision-map:
+    name: ai-decision-map
