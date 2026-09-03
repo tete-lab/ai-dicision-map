@@ -1,6 +1,6 @@
 name: ai-decision-map
 
-# 운영 서버용 구성. 외부 공개는 호스트 Nginx가 담당하며 컨테이너 포트는 localhost에만 바인딩합니다.
+# NPM이 내부 IP로 접근합니다. 공유기에서 3007/8013을 외부 포트 포워딩하지 마세요.
 services:
   api:
     build:
@@ -22,7 +22,7 @@ services:
       LLM_CONVERSATION_MAX_OUTPUT_TOKENS: ${LLM_CONVERSATION_MAX_OUTPUT_TOKENS:-3500}
       LLM_NARRATIVE_MAX_OUTPUT_TOKENS: ${LLM_NARRATIVE_MAX_OUTPUT_TOKENS:-3500}
     ports:
-      - "127.0.0.1:8013:8013"
+      - "192.168.0.26:8013:8013"
     networks:
       - decision-map
     logging:
@@ -43,7 +43,7 @@ services:
     depends_on:
       - api
     ports:
-      - "127.0.0.1:3007:3007"
+      - "192.168.0.26:3007:3007"
     networks:
       - decision-map
     logging:

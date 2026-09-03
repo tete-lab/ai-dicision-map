@@ -46,5 +46,5 @@ jobs:
             docker compose --env-file config/app.env -f docker-compose.prd.yml config --quiet
             docker compose --env-file config/app.env -f docker-compose.prd.yml build
             docker compose --env-file config/app.env -f docker-compose.prd.yml up -d
-            curl --fail --retry 12 --retry-connrefused --retry-delay 5 --max-time 10 http://127.0.0.1:8013/api/v1/health
-            curl --fail --retry 12 --retry-connrefused --retry-delay 5 --max-time 10 --output /dev/null http://127.0.0.1:3007/
+            curl --fail --retry 12 --retry-all-errors --retry-delay 5 --max-time 10 http://192.168.0.26:8013/api/v1/health
+            curl --fail --retry 12 --retry-all-errors --retry-delay 5 --max-time 10 --output /dev/null http://192.168.0.26:3007/
