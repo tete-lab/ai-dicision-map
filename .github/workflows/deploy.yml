@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 배포 파일만 복사해 서버의 .git을 덮어쓰지 않습니다.
       # config/app.env는 저장소에 없으며 서버의 기존 비밀 설정을 보존합니다.
       - name: Copy sources to server
         uses: appleboy/scp-action@v0.1.7
@@ -26,7 +27,7 @@ jobs:
           host: ${{ secrets.BACKEND_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "."
+          source: "backend,frontend,config,nginx,docker-compose.prd.yml"
           target: /home/${{ secrets.SERVER_USER }}/ai-decision-map
           rm: false
           overwrite: true
