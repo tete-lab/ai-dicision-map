@@ -103,15 +103,19 @@ export type DecisionResultResponse = {
       missingAssessments: Array<{ optionId: string; criterionId: string }>;
     };
     narrativeStatus: "PENDING" | "READY" | "FALLBACK";
+    narrativeError?: string | null;
     guidance: {
       encouragedOptionId: string | null;
-      basis: "USER_LEANING_SUPPORTED" | "SCORE_LEADER" | "TIE";
+      basis: "USER_LEANING_SUPPORTED" | "SCORE_LEADER" | "TIE" | "CONTEXTUAL" | "NEEDS_VERIFICATION";
       headline: string;
       rationale: string;
       encouragement: string;
+      nextAction?: string;
+      practicalAlternative?: string;
+      evidenceRefs?: string[];
       confidence: "HIGH" | "MEDIUM" | "LOW";
     };
-    optionProfiles: Array<{ optionId: string; pros: string[]; cons: string[] }>;
+    optionProfiles: Array<{ optionId: string; pros: string[]; cons: string[]; bestWhen?: string; evidenceRefs?: string[] }>;
     scenarioForecasts: Array<{
       criterionId: string;
       criterionName: string;

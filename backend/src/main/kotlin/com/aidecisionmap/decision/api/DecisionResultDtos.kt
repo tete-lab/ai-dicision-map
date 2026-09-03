@@ -51,10 +51,11 @@ data class DecisionResult(
     val evidenceQuality: ResultEvidenceQuality,
     val actionPlan: List<ResultActionStep>,
     val decisionRules: List<ResultDecisionRule>,
+    val narrativeError: String? = null,
 )
 
 enum class NarrativeStatus { PENDING, READY, FALLBACK }
-enum class GuidanceBasis { USER_LEANING_SUPPORTED, SCORE_LEADER, TIE }
+enum class GuidanceBasis { USER_LEANING_SUPPORTED, SCORE_LEADER, TIE, CONTEXTUAL, NEEDS_VERIFICATION }
 
 data class ResultGuidance(
     val encouragedOptionId: String?,
@@ -63,12 +64,17 @@ data class ResultGuidance(
     val rationale: String,
     val encouragement: String,
     val confidence: String,
+    val nextAction: String = "",
+    val practicalAlternative: String = "",
+    val evidenceRefs: List<String> = emptyList(),
 )
 
 data class ResultOptionProfile(
     val optionId: String,
     val pros: List<String>,
     val cons: List<String>,
+    val bestWhen: String = "",
+    val evidenceRefs: List<String> = emptyList(),
 )
 
 data class ResultScenarioForecast(

@@ -47,7 +47,7 @@ class OpenAiLlmClient(
     }
 
     private fun ensureConfigured() {
-        if (properties.apiKey.isBlank()) {
+        if (properties.apiKey.isBlank() || properties.apiKey.startsWith("replace-with-") || properties.apiKey == "YOUR_API_KEY") {
             throw LlmConfigurationException("LLM_API_KEY is not configured")
         }
     }
@@ -110,15 +110,15 @@ class OpenAiLlmClient(
             "format" to mapOf(
                 "type" to "json_schema",
                     "name" to "decision_result_narrative",
-                    "description" to "Grounded, supportive explanation and action plan for deterministic decision scores",
+                    "description" to "Context-grounded alternatives, tradeoffs and actionable decision advice",
                 "strict" to true,
                 "schema" to decisionInsightSchema,
             ),
         ),
         "max_output_tokens" to properties.narrativeMaxOutputTokens,
         "store" to false,
-        "prompt_cache_key" to "${properties.promptVersion}-insights",
-        "metadata" to mapOf("prompt_version" to "${properties.promptVersion}-insights"),
+        "prompt_cache_key" to "${properties.promptVersion}-insights-v2",
+        "metadata" to mapOf("prompt_version" to "${properties.promptVersion}-insights-v2"),
     )
 
     private fun executeRequest(payload: Map<String, Any>): String {
@@ -194,15 +194,20 @@ class OpenAiLlmClient(
         """.trimIndent()
 
         val INSIGHT_PROMPT = """
-            You are a warm, evidence-grounded Korean decision coach. Explain the deterministic result and give the user a practical push toward the encouraged option.
+            You are a warm, evidence-grounded Korean decision coach. Your deliverable is a practical recommendation, NOT a narration of the score table.
             The numeric scores and normalized weights in the input are final values calculated by server code.
             Never recalculate, change, round differently, or invent a numeric score.
             Present concrete benefits and drawbacks of both the encouraged option and its alternatives. Explain what positive effect the encouraged option can create for this user.
             For every input option, return one optionProfile with exactly 2-3 concrete pros and 2-3 concrete cons. Compare options against each other using criterion scores, weights, user facts, and stated uncertainty. Do not merely repeat the user's sentences or list criterion names.
             Recommend a direction clearly, but state the strongest reason the alternative could still be better and the factual condition that would reverse the recommendation.
-            If encouragementBasis is USER_LEANING_SUPPORTED, lean slightly toward the user's revealed preference. If it is SCORE_LEADER, encourage the score leader. If evidence is weak or stakes are high, encourage the next evidence-gathering action instead of risky commitment.
+            The score leader is only a subjective preference signal, not a required recommendation. Select recommendedOptionId from the input options only when the real context supports it. Use null when a concrete verification step or deferral is more appropriate. Do not override safety, affordability or explicit constraints to affirm a preference.
+            Explain the causal link: user-provided circumstance -> practical effect -> why this option is suitable now. Never use numeric scores, score gaps or rankings as pros, cons, rationale or evidence. Assessments tagged USER_ASSUMPTION are subjective, not verified facts, even if their reason sounds confident.
+            nextAction must be one immediately doable task. practicalAlternative must offer a concrete lower-risk route beyond the binary choice, e.g. checking whether a trial, rental, repair or waiting period is available. Do not claim such services exist without evidence.
+            For a purchase, address the intended use, existing substitutes, total cost, frequency of use and reversibility if supplied. If absent, name the decisive missing information instead of inventing prices, reviews or savings. A grounded 'verify this before buying' is better than an unsupported purchase endorsement.
+            Each optionProfile must include bestWhen (the concrete condition making that alternative suitable) and evidenceRefs. Phrase unverified consequences conditionally and distinguish them from user-reported facts.
+            Keep the answer concise: prefer two useful pros and cons per option, two focused insights and two or three actionable steps. Each should add new decision-relevant information rather than repeating the verdict.
             Be clear and directional. Do not repeat generic phrases such as 'the choice is yours'. Never pressure, diagnose, shame hesitation, or invent certainty.
-            Every factual claim must point to an input string in evidenceRefs. Put assumptions in assumptionRefs and state what could change the result.
+            evidenceRefs must copy exact strings from knownFacts or userLeaningEvidence only. assumptionRefs must copy exact strings from assumptions or aiInferences only. Use empty arrays when no such evidence exists; never fabricate sources, citations, URLs or external research. User-reported facts are not independently verified. If there is no supporting evidence, set recommendedOptionId to null and confidence to LOW.
             Make action steps specific, ordered, time-bounded, and testable with a clear doneWhen condition.
             Return only the JSON object required by the response schema.
         """.trimIndent()

@@ -6,6 +6,9 @@ import com.aidecisionmap.ai.client.InsightCriterionInput
 import com.aidecisionmap.ai.client.InsightOptionInput
 import com.aidecisionmap.ai.client.LlmClient
 import com.aidecisionmap.ai.client.LlmNarrativeRequest
+import com.aidecisionmap.ai.client.LlmConfigurationException
+import com.aidecisionmap.ai.client.LlmUnavailableException
+import com.aidecisionmap.ai.schema.MalformedLlmResponseException
 import com.aidecisionmap.decision.api.AnalyzeDecisionRequest
 import com.aidecisionmap.decision.api.DecisionResult
 import com.aidecisionmap.decision.api.DecisionResultResponse
@@ -116,15 +119,14 @@ class DecisionAnalysisService(
         }
         val assessments = scoreRepository.findByOptionSessionOrderByIdAsc(session)
         val engineResult = calculateFromEntities(options, criteria, assessments)
-        val guidance = fallbackGuidance(state, options, engineResult)
+        val guidance = fallbackGuidance(state, options)
         val scoreByOption = engineResult.optionScores.associateBy { it.optionId }
-        val narrative = llmClient.generateNarrative(
-            LlmNarrativeRequest(
+        val narrativeRequest = LlmNarrativeRequest(
                 decisionTitle = state.decisionTitle,
                 options = options.map { InsightOptionInput(it.optionKey, it.name, scoreByOption.getValue(it.optionKey).score) },
                 criteria = criteria.map { InsightCriterionInput(it.criterionKey, it.name, it.weight) },
                 assessments = assessments.map {
-                    InsightAssessmentInput(it.option.optionKey, it.criterion.criterionKey, it.score, it.reason)
+                    InsightAssessmentInput(it.option.optionKey, it.criterion.criterionKey, it.score, it.reason, it.sourceType.name)
                 },
                 completenessPercent = engineResult.completeness.weightedCoveragePercent,
                 encouragedOptionId = guidance.encouragedOptionId,
@@ -135,8 +137,22 @@ class DecisionAnalysisService(
                 assumptions = state.assumptions,
                 aiInferences = state.aiInferences,
                 missingInformation = state.missingInformation,
-            ),
-        )
+            )
+        val narrative = try {
+            llmClient.generateNarrative(narrativeRequest).also { NarrativeGrounding.validate(it, narrativeRequest) }
+        } catch (error: RuntimeException) {
+            val code = when (error) {
+                is LlmConfigurationException -> "LLM_NOT_CONFIGURED"
+                is MalformedLlmResponseException -> "LLM_EVIDENCE_INVALID"
+                is LlmUnavailableException -> "LLM_UNAVAILABLE"
+                else -> throw error
+            }
+            // Persist the failure so reloads never pretend that a missing narrative is still generating.
+            session.resultNarrativeJson = objectMapper.writeValueAsString(mapOf("failureCode" to code))
+            sessionRepository.save(session)
+            return DecisionResultResponse(DecisionStage.ANALYZED,
+                buildResult(session, state, options, criteria, assessments, engineResult, null))
+        }
         session.resultNarrativeJson = objectMapper.writeValueAsString(narrative)
         insightRepository.deleteAllInBatch(insightRepository.findBySessionOrderByPriorityAscIdAsc(session))
         insightRepository.saveAll(narrative.insights.map {
@@ -176,11 +192,14 @@ class DecisionAnalysisService(
         narrative: GeneratedNarrative? = readNarrative(session),
     ): DecisionResult {
         val scoreByOption = engineResult.optionScores.associateBy { it.optionId }
-        val fallback = fallbackGuidance(state, options, engineResult)
+        val fallback = fallbackGuidance(state, options)
         val guidance = narrative?.verdict?.let {
-            fallback.copy(headline = it.headline, rationale = it.rationale, encouragement = it.encouragement, confidence = it.confidence.name)
+            fallback.copy(encouragedOptionId = it.recommendedOptionId,
+                basis = if (it.recommendedOptionId == null) GuidanceBasis.NEEDS_VERIFICATION else GuidanceBasis.CONTEXTUAL,
+                headline = it.headline, rationale = it.rationale, encouragement = it.encouragement, confidence = it.confidence.name,
+                nextAction = it.nextAction, practicalAlternative = it.practicalAlternative, evidenceRefs = it.evidenceRefs)
         } ?: fallback
-        val fallbackInsights = buildFallbackInsights(guidance, options, criteria, assessments)
+        val fallbackInsights = buildFallbackInsights(guidance)
         val resultInsights = narrative?.insights?.map {
             ResultInsight(it.type, it.title, it.content, it.priority, it.evidenceRefs, it.assumptionRefs, it.confidence.name, it.whatCouldChange)
         } ?: fallbackInsights
@@ -205,12 +224,13 @@ class DecisionAnalysisService(
                 engineResult.completeness.weightedCoveragePercent,
                 engineResult.completeness.missingAssessments.map { MissingAssessmentDto(it.optionId, it.criterionId) },
             ),
-            narrativeStatus = if (narrative == null) NarrativeStatus.PENDING else NarrativeStatus.READY,
+            narrativeStatus = if (narrative != null) NarrativeStatus.READY else if (readNarrativeFailure(session) != null) NarrativeStatus.FALLBACK else NarrativeStatus.PENDING,
+            narrativeError = readNarrativeFailure(session),
             guidance = guidance,
             optionProfiles = narrative?.optionProfiles
                 ?.takeIf { profiles -> profiles.map { it.optionId }.toSet() == options.map { it.optionKey }.toSet() }
-                ?.map { ResultOptionProfile(it.optionId, it.pros, it.cons) }
-                ?: buildOptionProfiles(options, criteria, assessments),
+                ?.map { ResultOptionProfile(it.optionId, it.pros, it.cons, it.bestWhen, it.evidenceRefs) }
+                ?: buildOptionProfiles(state.decisionTitle, options, criteria),
             scenarioForecasts = buildScenarioForecasts(options, criteria, assessments),
             evidenceQuality = buildEvidenceQuality(state, assessments),
             actionPlan = narrative?.actionPlan?.map {
@@ -224,75 +244,45 @@ class DecisionAnalysisService(
     private fun fallbackGuidance(
         state: DecisionState,
         options: List<DecisionOptionEntity>,
-        result: DecisionEngineResult,
     ): ResultGuidance {
-        val scored = result.optionScores.filter { it.score != null }.sortedByDescending { it.score }
-        val leader = scored.firstOrNull()
-        val leaning = scored.firstOrNull { it.optionId == state.userLeaningOptionId }
-        val leaningSupported = leader?.score != null && leaning?.score != null &&
-            leader.score.subtract(leaning.score).abs() <= BigDecimal("8.00")
-        val encouraged = if (leaningSupported) leaning else leader
-        val optionName = options.firstOrNull { it.optionKey == encouraged?.optionId }?.name ?: "상위 선택지"
-        val basis = when {
-            scored.size > 1 && scored[0].score?.compareTo(scored[1].score) == 0 -> GuidanceBasis.TIE
-            leaningSupported -> GuidanceBasis.USER_LEANING_SUPPORTED
-            else -> GuidanceBasis.SCORE_LEADER
-        }
-        val headline = when (basis) {
-            GuidanceBasis.USER_LEANING_SUPPORTED -> "$optionName 쪽으로 마음을 옮겨도 좋아 보여요."
-            GuidanceBasis.TIE -> "점수는 팽팽하지만, 마음이 편해지는 방향을 시험해볼 때예요."
-            GuidanceBasis.SCORE_LEADER -> "$optionName 쪽이 현재 기준에서 한 걸음 앞서 있어요."
-        }
+        val purchase = isPurchase(state.decisionTitle, options)
+        val next = if (purchase) "구매로 해결하려는 문제와 이번 달 부담 가능한 총지출을 적어보세요."
+            else "${state.missingInformation.firstOrNull() ?: "가장 중요한 조건의 실제 내용"}을 확인해보세요."
         return ResultGuidance(
-            encouragedOptionId = encouraged?.optionId,
-            basis = basis,
-            headline = headline,
-            rationale = if (basis == GuidanceBasis.USER_LEANING_SUPPORTED) {
-                "점수 차이가 크지 않고 대화에서 드러난 선호도 같은 방향을 가리켜요."
-            } else {
-                "사용자가 확인한 기준별 점수와 가중치를 합산한 결과예요."
-            },
-            encouragement = "$optionName 선택이 만들 변화를 작은 실행으로 먼저 확인해보세요. 확신은 행동 뒤에 더 선명해질 수 있어요.",
-            confidence = if (result.completeness.weightedCoveragePercent >= BigDecimal("80")) "MEDIUM" else "LOW",
+            encouragedOptionId = null,
+            basis = GuidanceBasis.NEEDS_VERIFICATION,
+            headline = if (purchase) "구매 확정 전에, 실제 필요와 지출 부담부터 확인해보세요." else "선택을 확정하기 전에 핵심 조건을 확인해보세요.",
+            rationale = "맞춤 AI 해석이 아직 완료되지 않았습니다. 입력한 선호 점수만으로 실제 장점이나 추천을 확정하지 않습니다.",
+            encouragement = "확인할 조건 하나를 정하는 것도 결정을 향한 진전이에요.",
+            confidence = "LOW",
+            nextAction = next,
+            practicalAlternative = if (purchase) "바로 구매하거나 완전히 포기하기 전에, 기존 물건으로 해결하거나 체험·대여가 가능한지 확인한 뒤 다시 결정할 수 있어요."
+                else "바로 실행하는 대신 짧은 체험이나 정보 확인이 가능한지 살펴보고, 확인한 조건으로 다시 비교해보세요.",
         )
     }
 
+    private fun isPurchase(title: String, options: List<DecisionOptionEntity>) =
+        Regex("구매|살까|구입|쇼핑").containsMatchIn(title + options.joinToString { it.name })
+
     private fun buildOptionProfiles(
+        title: String,
         options: List<DecisionOptionEntity>,
         criteria: List<DecisionCriterionEntity>,
-        assessments: List<CriterionOptionScoreEntity>,
     ): List<ResultOptionProfile> {
-        val criterionNames = criteria.associate { it.criterionKey to it.name }
         return options.map { option ->
-            val values = assessments.filter { it.option.optionKey == option.optionKey }
-            val comparisons = values.map { assessment ->
-                val alternatives = assessments.filter {
-                    it.criterion.criterionKey == assessment.criterion.criterionKey && it.option.optionKey != option.optionKey
-                }
-                val comparison = alternatives.map { it.score }.takeIf { it.isNotEmpty() }
-                    ?.reduce(BigDecimal::add)?.divide(BigDecimal.valueOf(alternatives.size.toLong()), 2, RoundingMode.HALF_UP)
-                    ?: BigDecimal("50")
-                assessment to assessment.score.subtract(comparison)
+            val purchase = isPurchase(title, options)
+            val defer = Regex("안\\s*(산|사|함|한다|구매)|않|보류|포기|유지|미루|미룸").containsMatchIn(option.name)
+            val pros = when {
+                purchase && defer -> listOf("지금 구매를 미루면 해당 구매 지출을 보류할 수 있어요.", "기존 물건이나 다른 해결 방법을 먼저 비교할 시간을 확보할 수 있어요.")
+                purchase -> listOf("실제로 자주 쓸 용도가 있다면 필요한 기능을 바로 활용할 수 있어요.", "기존 방법의 불편을 해결하는 제품인지 확인되면 구매 목적이 분명해져요.")
+                else -> listOf("${criteria.firstOrNull()?.name ?: "핵심 조건"}을 실제로 충족하는지 확인할 후보예요.", "작게 시험할 수 있다면 전면 실행 전에 적합성을 확인할 수 있어요.")
             }
-            val favorable = comparisons.filter { it.second >= BigDecimal.ZERO }.sortedByDescending { it.second }
-            val pros = (favorable.ifEmpty { comparisons.sortedByDescending { it.first.score }.take(2) }).take(3).map { (assessment, difference) ->
-                val name = criterionNames[assessment.criterion.criterionKey] ?: "핵심 기준"
-                if (difference >= BigDecimal.ZERO) {
-                    "${name}에서 다른 대안보다 ${difference.setScale(0, RoundingMode.HALF_UP)}점 유리해 기대 효과가 큽니다. ${assessment.reason.orEmpty()}".trim()
-                } else {
-                    "$name 점수 ${assessment.score.setScale(0, RoundingMode.HALF_UP)}점은 이 대안에서 살릴 수 있는 장점입니다. ${assessment.reason.orEmpty()}".trim()
-                }
+            val cons = when {
+                purchase && defer -> listOf("현재 꼭 필요한 용도가 있다면 그 필요가 해결되지 않을 수 있어요.", "대체 방법에도 시간이나 비용이 드는지 확인해야 해요.")
+                purchase -> listOf("구매대금 외 유지비·부속품 비용까지 지출 한도 안인지 확인해야 해요.", "기대만큼 쓰지 않을 때의 부담과 반품 조건은 아직 확인되지 않았어요.")
+                else -> listOf("실제 비용과 필요한 시간은 입력된 근거로 다시 확인해야 해요.", "예상과 다를 때 되돌릴 수 있는 조건을 확인해야 해요.")
             }
-            val unfavorable = comparisons.filter { it.second < BigDecimal.ZERO }.sortedBy { it.second }
-            val cons = (unfavorable.ifEmpty { comparisons.sortedBy { it.first.score }.take(2) }).take(3).map { (assessment, difference) ->
-                val name = criterionNames[assessment.criterion.criterionKey] ?: "핵심 기준"
-                if (difference < BigDecimal.ZERO) {
-                    "${name}에서 다른 대안보다 ${difference.abs().setScale(0, RoundingMode.HALF_UP)}점 불리할 수 있어 실제 조건 확인이 필요합니다. ${assessment.reason.orEmpty()}".trim()
-                } else {
-                    "${name}은 상대 우위가 있어도 ${assessment.score.setScale(0, RoundingMode.HALF_UP)}점 수준이므로 기대치를 현실과 대조해야 합니다. ${assessment.reason.orEmpty()}".trim()
-                }
-            }
-            ResultOptionProfile(option.optionKey, pros, cons)
+            ResultOptionProfile(option.optionKey, pros, cons, "기본 점검 안내이며 맞춤 AI 분석으로 검증된 결론은 아닙니다.")
         }
     }
 
@@ -334,43 +324,34 @@ class DecisionAnalysisService(
         val assumptionCount = state.assumptions.size + assessments.count { it.sourceType == DecisionSourceType.USER_ASSUMPTION }
         val inferenceCount = state.aiInferences.size + assessments.count { it.sourceType == DecisionSourceType.AI_INFERENCE }
         val reasoned = assessments.count { !it.reason.isNullOrBlank() }
-        val level = when {
-            factCount >= assumptionCount && reasoned == assessments.size -> "HIGH"
-            factCount > 0 || reasoned >= assessments.size / 2 -> "MEDIUM"
-            else -> "LOW"
-        }
+        // Filling a score form is not independent verification of the underlying facts.
+        val level = if (state.knownFacts.size >= 2 && state.missingInformation.isEmpty()) "MEDIUM" else "LOW"
         return ResultEvidenceQuality(level, factCount, assumptionCount, inferenceCount, reasoned)
     }
 
     private fun buildFallbackInsights(
         guidance: ResultGuidance,
-        options: List<DecisionOptionEntity>,
-        criteria: List<DecisionCriterionEntity>,
-        assessments: List<CriterionOptionScoreEntity>,
     ): List<ResultInsight> {
-        val encouraged = options.firstOrNull { it.optionKey == guidance.encouragedOptionId }
-        val strongest = assessments.filter { it.option.optionKey == encouraged?.optionKey }.maxByOrNull { it.score }
-        val criterion = criteria.firstOrNull { it.criterionKey == strongest?.criterion?.criterionKey }
         return listOf(
             ResultInsight(
                 InsightType.KEY_DRIVER,
-                "지금 가장 힘을 주는 기준",
-                "${criterion?.name ?: "상위 기준"}에서 ${encouraged?.name ?: "추천 방향"}의 평가가 상대적으로 좋아요.",
+                "먼저 확인할 실제 조건",
+                guidance.nextAction,
                 1,
-                strongest?.reason?.let(::listOf) ?: emptyList(),
                 emptyList(),
-                "MEDIUM",
-                "해당 기준의 실제 조건이 달라지면 순위도 바뀔 수 있어요.",
+                emptyList(),
+                "LOW",
+                "실제 조건을 확인한 뒤에 추천 방향을 판단할 수 있어요.",
             ),
             ResultInsight(
                 InsightType.TRADE_OFF,
-                "장점은 살리고 부담은 작게 시험하세요",
-                "추천 방향의 장점을 먼저 작은 행동으로 검증하면 결정 부담을 줄일 수 있어요.",
+                "바로 결정하기 어려울 때의 대안",
+                guidance.practicalAlternative,
                 2,
                 emptyList(),
-                listOf("입력한 점수가 실제 조건을 반영한다는 가정"),
+                emptyList(),
                 "LOW",
-                "현실 자료와 점수를 대조하면 판단이 더 분명해져요.",
+                "대안의 실제 이용 가능 여부는 확인이 필요합니다.",
             ),
         )
     }
@@ -380,12 +361,12 @@ class DecisionAnalysisService(
         guidance: ResultGuidance,
         options: List<DecisionOptionEntity>,
     ): List<ResultActionStep> {
-        val name = options.firstOrNull { it.optionKey == guidance.encouragedOptionId }?.name ?: "추천 선택지"
+        val name = options.firstOrNull { it.optionKey == guidance.encouragedOptionId }?.name ?: "각 선택지"
         val missing = state.missingInformation.firstOrNull() ?: "가장 중요한 기준의 실제 조건"
         return listOf(
-            ResultActionStep(1, "오늘", "${name}의 실제 조건 한 가지 확인하기", "기대 효과를 현실 자료로 확인하면 망설임이 줄어요.", listOf(missing), "확인한 근거를 한 문장으로 기록했을 때"),
-            ResultActionStep(2, "이번 주", "${name}을 되돌릴 수 있는 작은 방식으로 시험하기", "큰 결정을 작은 실험으로 바꾸면 장점과 부담을 직접 느낄 수 있어요.", emptyList(), "해본 뒤 만족·불안 점수를 각각 10점 만점으로 남겼을 때"),
-            ResultActionStep(3, "실험 후", "점수와 마음의 변화를 다시 비교하기", "근거와 감정이 같은 방향인지 확인하는 마지막 단계예요.", listOf("실험 전후 점수"), "선택 또는 재검토 조건 중 하나가 충족됐을 때"),
+            ResultActionStep(1, "오늘", guidance.nextAction, "기대 효과를 현실 자료로 확인하면 망설임이 줄어요.", listOf(missing), "확인한 근거를 한 문장으로 기록했을 때"),
+            ResultActionStep(2, "확인 후", "${name}을 되돌릴 수 있는 작은 방식으로 시험할 수 있는지 알아보기", "큰 결정을 작은 실험으로 바꾸면 장점과 부담을 직접 느낄 수 있어요.", emptyList(), "가능한 체험 방법과 중단 조건을 확인했을 때"),
+            ResultActionStep(3, "실험 후", "실제 효과와 감당할 부담으로 다시 비교하기", "근거와 마음이 같은 방향인지 확인하는 단계예요.", listOf("실험에서 확인한 장점과 부담"), "선택 또는 보류할 조건을 한 문장으로 정했을 때"),
         )
     }
 
@@ -393,7 +374,7 @@ class DecisionAnalysisService(
         val name = options.firstOrNull { it.optionKey == guidance.encouragedOptionId }?.name ?: "추천 방향"
         return listOf(
             ResultDecisionRule("SELECT", "${name}의 핵심 장점이 실제 확인되고 감정적 부담이 감당 가능한 수준일 때"),
-            ResultDecisionRule("REASSESS", "가장 중요한 기준의 실제 점수가 예상보다 10점 이상 낮을 때"),
+            ResultDecisionRule("REASSESS", "실제 용도·비용·조건이 처음 기대와 다르다고 확인될 때"),
             ResultDecisionRule("PAUSE", "되돌리기 어려운 손실이나 안전 문제가 새로 확인될 때"),
         )
     }
@@ -420,7 +401,11 @@ class DecisionAnalysisService(
 
     private fun readNarrative(session: DecisionSessionEntity): GeneratedNarrative? = session.resultNarrativeJson
         ?.takeIf(String::isNotBlank)
+        ?.takeUnless { objectMapper.readTree(it).has("failureCode") }
         ?.let { objectMapper.readValue(it, GeneratedNarrative::class.java) }
+
+    private fun readNarrativeFailure(session: DecisionSessionEntity): String? = session.resultNarrativeJson
+        ?.takeIf(String::isNotBlank)?.let { objectMapper.readTree(it).path("failureCode").asText("").ifBlank { null } }
 
     private fun clearPreviousResult(session: DecisionSessionEntity) {
         scoreRepository.deleteAllInBatch(scoreRepository.findByOptionSessionOrderByIdAsc(session))

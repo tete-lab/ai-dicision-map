@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, CheckCircle2, Circle, CircleDot, Compass, Download, Lightbulb, Map, MessageCircleMore, RotateCcw, Save, Send, Share2, Sparkles, UserRound, WandSparkles } from "lucide-react";
+import { ArrowRight, Bot, Check, CheckCircle2, Circle, CircleDot, Compass, Download, Lightbulb, Map, MessageCircleMore, RotateCcw, Save, Send, Share2, Sparkles, UserRound } from "lucide-react";
 import {
   analyzeDecision,
   ApiRequestError,
@@ -31,7 +31,7 @@ const steps: Array<{ number: Stage; title: string; subtitle: string }> = [
   { number: 3, title: "분석 중", subtitle: "결정 엔진" },
   { number: 4, title: "결과 보기", subtitle: "결정 지도" },
 ];
-const analysisItems = ["결정 상태 검증", "가중치 정규화", "선택지별 점수 계산", "결과 지도 구성"];
+const analysisItems = ["입력과 선택지 확인", "선호 경향 계산", "AI가 대안과 근거 검토", "맞춤 조언 정리 중"];
 const resultTabs: Array<{ id: ResultTab; label: string }> = [
   { id: "map", label: "결정 지도" }, { id: "compare", label: "비교 요약" }, { id: "insight", label: "AI 인사이트" }, { id: "action", label: "액션 플랜" },
 ];
@@ -182,16 +182,31 @@ export function DecisionWorkspace() {
         sourceType: "USER_ASSUMPTION" as const,
       }));
     });
+    const epoch = ++conversationEpoch.current;
     setAnalysisLoading(true); setAnalysisError(null); setAnalysisStep(0); setStage(3);
     try {
       const response = await analyzeDecision(sessionId, assessments);
-      setDecisionResult(response.result); setAnalysisStep(analysisItems.length); setStage(4);
-      enrichDecisionResult(sessionId)
-        .then((enriched) => setDecisionResult(enriched.result))
-        .catch(() => setDecisionResult((current) => current ? { ...current, narrativeStatus: "FALLBACK" } : current));
+      if (epoch !== conversationEpoch.current) return;
+      const enriched = await enrichDecisionResult(sessionId).catch(() => ({
+        ...response, result: { ...response.result, narrativeStatus: "FALLBACK" as const, narrativeError: "NETWORK_ERROR" },
+      }));
+      if (epoch !== conversationEpoch.current) return;
+      setDecisionResult(enriched.result); setAnalysisStep(analysisItems.length); setStage(4);
     } catch (error) {
-      setAnalysisError(toConversationError(error)); setStage(2);
-    } finally { setAnalysisLoading(false); }
+      if (epoch === conversationEpoch.current) { setAnalysisError(toConversationError(error)); setStage(2); }
+    } finally { if (epoch === conversationEpoch.current) setAnalysisLoading(false); }
+  }
+
+  async function retryNarrative() {
+    if (!sessionId || analysisLoading) return;
+    const epoch = conversationEpoch.current;
+    setAnalysisLoading(true);
+    try {
+      const response = await enrichDecisionResult(sessionId);
+      if (epoch === conversationEpoch.current) setDecisionResult(response.result);
+    } catch {
+      if (epoch === conversationEpoch.current) setDecisionResult((current) => current ? { ...current, narrativeStatus: "FALLBACK", narrativeError: "NETWORK_ERROR" } : current);
+    } finally { if (epoch === conversationEpoch.current) setAnalysisLoading(false); }
   }
 
   function resetDemo() {
@@ -214,7 +229,7 @@ export function DecisionWorkspace() {
         {stage === 1 && <QuestionStage decision={decision} setDecision={setDecision} submittedDecision={submittedDecision} state={decisionState} loading={conversationLoading} error={conversationError} onSubmit={submitDecision} />}
         {stage === 2 && <><div className="response-mode-notice" role="status">{responseMode === "FALLBACK" ? "AI 연결이 원활하지 않아 기본 안내로 진행 중입니다. 입력은 저장되며, 맞춤 AI 분석에는 서버 API 설정 확인이 필요합니다." : responseMode === "GUIDED" ? "기본 안내로 선택지를 정리하고 있어요." : "AI가 답변 내용을 반영하고 있어요."}</div><CollectionStage decision={submittedDecision} messages={chatMessages} state={decisionState} suggestionMode={suggestionMode} suggestedAnswers={suggestedAnswers} input={chatInput} setInput={setChatInput} loading={conversationLoading} error={analysisError ?? conversationError} onSubmit={continueConversation} scores={assessmentScores} onScoreChange={(key, value) => setAssessmentScores((current) => ({ ...current, [key]: value }))} onAnalyze={runAnalysis} /></>}
         {stage === 3 && <AnalysisStage progress={analysisStep} loading={analysisLoading} onShowResult={() => decisionResult && setStage(4)} />}
-        {stage === 4 && decisionResult && <ResultStage activeTab={resultTab} setActiveTab={setResultTab} result={decisionResult} />}
+        {stage === 4 && decisionResult && <ResultStage activeTab={resultTab} setActiveTab={setResultTab} result={decisionResult} retrying={analysisLoading} onRetry={retryNarrative} />}
 
         <footer className="workspace-footer"><span>망설임을 근거 있는 다음 행동으로 바꿔드립니다.</span><span>사용자 입력 · AI 추론 · 사용자 가정을 분리해 표시합니다.</span></footer>
       </section>
@@ -265,7 +280,10 @@ function CollectionStage({ decision, messages, state, suggestionMode, suggestedA
   const complete = state?.readyToAnalyze ?? false;
   const endRef = useRef<HTMLDivElement>(null);
   const latestQuestion = [...messages].reverse().find((message) => message.role === "assistant")?.content ?? state?.nextQuestion ?? "";
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages, loading]);
+  useEffect(() => {
+    const container = endRef.current?.parentElement;
+    container?.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
   return <div className="workspace-body collection-layout"><section className="conversation-card collection-card"><AssistantHeader label="2단계 · 정보 수집" /><div className="collection-progress"><div><span>{complete ? "분석 준비 완료" : `핵심 질문 ${state?.askedQuestions?.length ?? 1}/최대 12`}</span><strong>{progress}%</strong></div><div className="segmented-progress">{Array.from({ length: 6 }).map((_, index) => <i key={index} className={index < Math.ceil(progress / 17) ? "filled" : ""} />)}</div></div><div className="collection-messages" aria-live="polite">{messages.length ? messages.map((message) => message.role === "user" ? <UserMessage key={message.id} message={message.content} status={message.status} /> : <div className="assistant-question" key={message.id}><span><Bot size={16} /></span><p>{message.content}</p></div>) : decision && <UserMessage message={decision} status="sent" />}{loading && <div className="assistant-thinking"><span><Sparkles size={17} /></span><div><strong>답변을 잘 받았어요</strong><p>이미 확인한 내용은 건너뛰고 다음 핵심을 정리하고 있어요.</p><i><b /><b /><b /></i></div></div>}{complete && <div className="ready-message"><CheckCircle2 size={20} /><div><strong>질문은 여기까지면 충분해요.</strong><p>각 기준은 양쪽 선택지를 한 번만 비교하면 됩니다.</p></div></div>}<div ref={endRef} /></div>{error && <ConversationError message={error} />}<div className="answer-panel chat-answer-panel">{!complete ? <>{!loading && <SuggestionBadges key={latestQuestion} question={latestQuestion} state={state} mode={suggestionMode} suggestions={suggestedAnswers} setInput={setInput} />}<MessageComposer id="collection-message" decision={input} setDecision={setInput} onSubmit={onSubmit} loading={loading} /></> : <AssessmentPanel state={state} scores={scores} onScoreChange={onScoreChange} onAnalyze={onAnalyze} />}</div></section><CollectedState state={state} /></div>;
 }
 
@@ -276,9 +294,9 @@ function SuggestionBadges({ question, state, mode, suggestions, setInput }: { qu
   if (state && state.options.length < 2) return <div className="suggestion-box"><strong>비교할 실제 선택지를 직접 입력해주세요</strong><p>입력 예: 선택지: 짜장면 / 짬뽕<br />제품·여행지·진로 등 어떤 후보든 가능하며, 2~8개를 / 로 구분해주세요.</p></div>;
   if (state && !state.nextQuestion.trim()) return null;
   function select(option: SuggestedAnswer) {
-    if (option.value === "__custom__") { setInput(""); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus()); return; }
+    if (option.value === "__custom__") { setInput(""); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus({ preventScroll: true })); return; }
     const naturalValue = state?.options.find((item) => item.id === option.value)?.name ?? option.value;
-    if (config.mode === "single") { setInput(naturalValue); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus()); return; }
+    if (config.mode === "single") { setInput(naturalValue); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus({ preventScroll: true })); return; }
     const next = order.includes(naturalValue) ? order.filter((item) => item !== naturalValue) : [...order, naturalValue];
     setOrder(next); setInput(next.length ? `우선순위는 ${next.map((item, index) => `${index + 1}순위 ${item}`).join(", ")}입니다.` : "");
   }
@@ -306,10 +324,24 @@ function AnalysisStage({ progress, loading, onShowResult }: { progress: number; 
   return <div className="analysis-layout"><section className="analysis-card" aria-live="polite"><div className="analysis-visual" aria-hidden="true">{Array.from({ length: 7 }).map((_, index) => <i key={index} />)}</div><span className="analysis-kicker">DECISION ENGINE</span><h2>{complete ? "분석이 완료됐어요" : "실제 API 결과를 계산하고 있어요"}</h2><p>{complete ? "선택지별 점수와 근거를 결정 지도로 정리했습니다." : "입력한 평가를 정규화하고 결정 지도를 먼저 만드는 중입니다."}</p><div className="analysis-list">{analysisItems.map((item, index) => <div className={index < progress ? "done" : index === progress ? "current" : "pending"} key={item}><span>{index < progress ? <Check size={14} /> : index === progress ? <Sparkles size={14} /> : <Circle size={11} />}</span><strong>{item}</strong>{index < progress && <small>완료</small>}{index === progress && !complete && <small>진행 중</small>}</div>)}</div>{complete ? <button className="primary-action wide" type="button" onClick={onShowResult}>결정 지도 확인하기 <ArrowRight size={17} /></button> : <small className="analysis-time">점수 결과를 먼저 보여드리고 AI 설명은 이어서 보강합니다.</small>}</section></div>;
 }
 
-function ResultStage({ activeTab, setActiveTab, result }: { activeTab: ResultTab; setActiveTab: (tab: ResultTab) => void; result: DecisionResult }) {
-  const encouraged = result.options.find((option) => option.id === result.guidance.encouragedOptionId);
-  const qualityLabel = { HIGH: "높음", MEDIUM: "보통", LOW: "확인 필요" }[result.evidenceQuality.level];
-  return <div className="result-layout"><section className="result-dashboard"><div className="result-tabs" role="tablist" aria-label="결정 분석 결과">{resultTabs.map((tab) => <button role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? "active" : ""} key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div><div className="recommendation-strip"><div><span>현재 기준 종합 결과 {result.narrativeStatus === "PENDING" && <i className="enriching-pill">AI 설명 정리 중</i>}</span><h2>{result.guidance.headline} <em>👍</em></h2><p>{result.guidance.rationale}</p><strong className="encouragement-copy">{result.guidance.encouragement}</strong></div><div className="score-summary"><span>응원 방향 점수</span><strong>{encouraged?.score ?? "-"}점</strong><small>{result.guidance.basis === "USER_LEANING_SUPPORTED" ? "점수와 마음의 방향 반영" : "가중 합산 결과"}</small></div><ul><li>점수 입력 {result.completeness.providedScoreCount}/{result.completeness.expectedScoreCount}</li><li>구조 충족도 {result.completeness.scoreCoveragePercent}%</li><li>근거 품질 {qualityLabel}</li></ul></div>{activeTab === "map" && <DecisionMapPanel result={result} />}{activeTab === "compare" && <ComparisonPanel result={result} />}{activeTab === "insight" && <InsightPanel result={result} />}{activeTab === "action" && <ActionPanel result={result} />}</section><aside className="result-side"><section className="scenario-card-panel"><header><WandSparkles size={19} /><div><h3>분석 신뢰도</h3><p>충족도와 근거 품질을 분리해 봅니다.</p></div></header><div className="result-metric"><span>구조 충족도</span><strong>{result.completeness.weightedCoveragePercent}%</strong></div><div className="result-metric"><span>근거 품질</span><strong>{qualityLabel}</strong></div><div className="evidence-counts"><span>사실 {result.evidenceQuality.factCount}</span><span>가정 {result.evidenceQuality.assumptionCount}</span><span>AI 추론 {result.evidenceQuality.inferenceCount}</span></div><div className="leader-note"><CheckCircle2 size={17} />점수·지도·표·인사이트는 모두 같은 분석 결과를 사용해요.</div></section><section className="share-panel"><h3>공유 및 저장</h3><p>분석 결과 활용 기능은 다음 단계에서 연결할 수 있어요.</p><div><button type="button"><Save size={16} />결과 저장</button><button type="button"><Share2 size={16} />링크 공유</button><button type="button"><Download size={16} />PDF</button></div></section><section className="source-panel"><h3>해석 원칙</h3><p>마음의 방향은 점수 차이가 크지 않을 때만 응원 방향에 반영합니다.</p></section></aside></div>;
+export function ResultStage({ activeTab, setActiveTab, result, retrying = false, onRetry }: { activeTab: ResultTab; setActiveTab: (tab: ResultTab) => void; result: DecisionResult; retrying?: boolean; onRetry?: () => void }) {
+  const qualityLabel = { HIGH: "높음", MEDIUM: "보통", LOW: "추가 확인 필요" }[result.evidenceQuality.level];
+  const ready = result.narrativeStatus === "READY";
+  return <div className="result-layout">
+    <section className="result-dashboard">
+      <div className="result-tabs" role="tablist" aria-label="결정 분석 결과">{resultTabs.map((tab) => <button role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? "active" : ""} key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
+      {!ready && <div className="narrative-notice" role="status"><strong>{retrying ? "AI가 대안과 근거를 다시 검토하고 있어요." : "맞춤 AI 분석이 아직 완료되지 않았어요."}</strong><p>아래 내용은 기본 점검 안내입니다. 선호 점수만으로 추천을 확정하지 않습니다.</p>{result.narrativeError === "LLM_NOT_CONFIGURED" && <p>서버의 실제 LLM_API_KEY 설정이 필요합니다.</p>}{result.narrativeError === "LLM_EVIDENCE_INVALID" && <p>AI 답변의 근거를 검증하지 못해 표시하지 않았습니다.</p>}{onRetry && <button type="button" onClick={onRetry} disabled={retrying}>{retrying ? "분석 중…" : "맞춤 AI 분석 다시 시도"}</button>}</div>}
+      <div className="recommendation-strip advice-first"><div><span>{ready ? "당신의 상황을 바탕으로 한 제안" : "결정 전 기본 점검"}</span><h2>{result.guidance.headline}</h2><p>{result.guidance.rationale}</p><strong className="encouragement-copy">{result.guidance.encouragement}</strong>
+        {!!result.guidance.evidenceRefs?.length && <div className="advice-evidence"><b>이렇게 판단한 대화 근거</b>{result.guidance.evidenceRefs.map((ref) => <p key={ref}>{ref}</p>)}<small>사용자가 제공한 정보이며 외부 검증된 사실과는 다릅니다.</small></div>}
+      </div></div>
+      <div className="practical-advice">{result.guidance.nextAction && <article><span>지금 할 한 가지</span><h3>{result.guidance.nextAction}</h3></article>}{result.guidance.practicalAlternative && <article><span>부담을 줄이는 대안</span><h3>{result.guidance.practicalAlternative}</h3></article>}</div>
+      {activeTab === "map" && <DecisionMapPanel result={result} />}
+      {activeTab === "compare" && <ComparisonPanel result={result} />}
+      {activeTab === "insight" && <InsightPanel result={result} />}
+      {activeTab === "action" && <ActionPanel result={result} />}
+    </section>
+    <aside className="result-side"><section className="scenario-card-panel"><header><Lightbulb size={19} /><div><h3>해석과 근거</h3><p>점수는 선호 경향이지 성공 확률이 아닙니다.</p></div></header><div className="result-metric"><span>대화 근거 품질</span><strong>{qualityLabel}</strong></div><div className="evidence-counts"><span>사용자 진술 {result.evidenceQuality.factCount}</span><span>가정 {result.evidenceQuality.assumptionCount}</span><span>AI 추론 {result.evidenceQuality.inferenceCount}</span></div><p>필수 입력을 채웠다는 것과 실제 조건이 확인되었다는 것은 다릅니다. 비용·조건·가능 여부는 결정 전에 확인하세요.</p></section><section className="share-panel"><h3>공유 및 저장</h3><p>분석 결과 활용 기능은 다음 단계에서 연결할 수 있어요.</p><div><button type="button"><Save size={16} />결과 저장</button><button type="button"><Share2 size={16} />링크 공유</button><button type="button"><Download size={16} />PDF</button></div></section><section className="source-panel"><h3>응원하는 방식</h3><p>마음이 가는 방향의 기대 효과를 설명하되, 중요한 위험이나 부족한 근거를 숨기지 않습니다.</p></section></aside>
+  </div>;
 }
 
 function DecisionMapPanel({ result }: { result: DecisionResult }) {
@@ -318,7 +350,7 @@ function DecisionMapPanel({ result }: { result: DecisionResult }) {
 
 function ComparisonPanel({ result }: { result: DecisionResult }) {
   const findAssessment = (criterionId: string, optionId: string) => result.assessments.find((item) => item.criterionId === criterionId && item.optionId === optionId);
-  return <div className="comparison-panel"><header><div><span>선택지 비교 테이블</span><h3>장점과 부담, 점수 차이를 한눈에 비교하세요.</h3></div><div className="mini-scores">{result.options.map((option) => <span key={option.id}>{option.name} <strong>{option.score ?? "-"}</strong></span>)}</div></header><div className="option-profile-grid">{result.optionProfiles.map((profile) => { const option = result.options.find((item) => item.id === profile.optionId); return <article key={profile.optionId} className={profile.optionId === result.guidance.encouragedOptionId ? "encouraged" : ""}><header><strong>{option?.name}</strong>{profile.optionId === result.guidance.encouragedOptionId && <span>응원 방향</span>}</header><div><h4>기대할 장점</h4>{profile.pros.map((item) => <p key={item}>+ {item}</p>)}</div><div><h4>확인할 부담</h4>{profile.cons.map((item) => <p key={item}>− {item}</p>)}</div></article>; })}</div><div className="table-wrap"><table><thead><tr><th>판단 기준</th>{result.options.map((option) => <th key={option.id}>{option.name}</th>)}<th>최대 차이</th></tr></thead><tbody>{result.criteria.map((criterion) => { const values = result.options.map((option) => findAssessment(criterion.id, option.id)?.score ?? 0); const delta = Math.max(...values) - Math.min(...values); return <tr key={criterion.id}><th>{criterion.name}<small>가중치 {Math.round(criterion.normalizedWeight * 100)}%</small></th>{result.options.map((option) => { const assessment = findAssessment(criterion.id, option.id); return <td key={option.id}><strong>{assessment?.score ?? "-"}점</strong><small>{assessment?.reason ?? "평가 근거 없음"}</small></td>; })}<td><strong className="delta-score">{delta}점</strong><small>{delta >= 20 ? "결정에 큰 영향" : "차이가 작음"}</small></td></tr>; })}</tbody><tfoot><tr><th>종합 점수</th>{result.options.map((option) => <td key={option.id}><strong>{option.score ?? "-"}점</strong><small>{option.rank ? `${option.rank}순위` : "순위 없음"}</small></td>)}<td /></tr></tfoot></table></div>{result.scenarioForecasts.length > 0 && <ScenarioChart result={result} />}</div>;
+  return <div className="comparison-panel"><header><div><span>선택지 비교 테이블</span><h3>어떤 상황에 적합한지, 얻는 것과 감수할 것을 비교하세요.</h3></div></header><div className="option-profile-grid">{result.optionProfiles.map((profile) => { const option = result.options.find((item) => item.id === profile.optionId); return <article key={profile.optionId} className={profile.optionId === result.guidance.encouragedOptionId ? "encouraged" : ""}><header><strong>{option?.name}</strong>{profile.optionId === result.guidance.encouragedOptionId && <span>응원 방향</span>}</header><div><h4>이런 경우에 적합해요</h4><p>{profile.bestWhen}</p></div><div><h4>기대할 장점</h4>{profile.pros.map((item) => <p key={item}>+ {item}</p>)}</div><div><h4>확인할 부담</h4>{profile.cons.map((item) => <p key={item}>− {item}</p>)}</div></article>; })}</div><details className="score-details"><summary>참고 자료: 입력한 선호 점수 비교</summary><p>높을수록 사용자가 더 선호한다는 뜻입니다. 실제 비용·품질·성공 가능성을 측정한 수치는 아닙니다.</p><div className="table-wrap" tabIndex={0} role="region" aria-label="선호 점수 비교표 — 가로로 스크롤"><table><thead><tr><th>판단 기준</th>{result.options.map((option) => <th key={option.id}>{option.name}</th>)}<th>최대 차이</th></tr></thead><tbody>{result.criteria.map((criterion) => { const values = result.options.map((option) => findAssessment(criterion.id, option.id)?.score ?? 0); const delta = Math.max(...values) - Math.min(...values); return <tr key={criterion.id}><th>{criterion.name}<small>가중치 {Math.round(criterion.normalizedWeight * 100)}%</small></th>{result.options.map((option) => { const assessment = findAssessment(criterion.id, option.id); return <td key={option.id}><strong>{assessment?.score ?? "-"}점</strong><small>사용자 상대 평가</small></td>; })}<td><strong className="delta-score">{delta}점</strong><small>{delta >= 20 ? "결정에 큰 영향" : "차이가 작음"}</small></td></tr>; })}</tbody><tfoot><tr><th>종합 점수</th>{result.options.map((option) => <td key={option.id}><strong>{option.score ?? "-"}점</strong><small>{option.rank ? `${option.rank}순위` : "순위 없음"}</small></td>)}<td /></tr></tfoot></table></div>{result.scenarioForecasts.length > 0 && <ScenarioChart result={result} />}</details></div>;
 }
 
 function ScenarioChart({ result }: { result: DecisionResult }) {
@@ -328,7 +360,7 @@ function ScenarioChart({ result }: { result: DecisionResult }) {
   const colors = ["#6046df", "#19a974", "#e45f78", "#3d7de2"];
   const x = (weight: number) => 52 + (weight / 60) * 620;
   const y = (score: number) => 220 - (score / 100) * 180;
-  return <section className="scenario-forecast"><header><div><span>시나리오 예측</span><h3>중요도를 바꾸면 결과가 어떻게 달라질까요?</h3></div><select value={forecast.criterionId} onChange={(event) => setSelected(event.target.value)} aria-label="시나리오 기준 선택">{result.scenarioForecasts.map((item) => <option key={item.criterionId} value={item.criterionId}>{item.criterionName}</option>)}</select></header><div className="scenario-svg-wrap"><svg viewBox="0 0 720 260" role="img" aria-label={`${forecast.criterionName} 가중치 변화에 따른 선택지 점수 그래프`}><g className="chart-grid">{[20, 40, 60, 80, 100].map((score) => <g key={score}><line x1="52" x2="682" y1={y(score)} y2={y(score)} /><text x="12" y={y(score) + 4}>{score}</text></g>)}</g>{result.options.map((option, index) => { const points = forecast.points.map((point) => ({ x: x(point.weightPercent), y: y(point.optionScores[option.id] ?? 0), score: point.optionScores[option.id] ?? 0, weight: point.weightPercent })); return <g key={option.id} style={{ color: colors[index % colors.length] }}><polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} /><g>{points.map((point) => <circle key={point.weight} cx={point.x} cy={point.y} r={point.weight === forecast.currentWeightPercent ? 6 : 4}><title>{`${option.name}: 가중치 ${point.weight}%, ${point.score}점`}</title></circle>)}</g></g>; })}<line className="current-weight-line" x1={x(forecast.currentWeightPercent)} x2={x(forecast.currentWeightPercent)} y1="28" y2="226" /><text className="current-weight-label" x={x(forecast.currentWeightPercent) + 6} y="24">현재 {forecast.currentWeightPercent}%</text>{forecast.points.map((point) => <text className="x-label" key={point.weightPercent} x={x(point.weightPercent)} y="246">{point.weightPercent}%</text>)}</svg></div><div className="chart-legend">{result.options.map((option, index) => <span key={option.id}><i style={{ background: colors[index % colors.length] }} />{option.name}</span>)}</div></section>;
+  return <section className="scenario-forecast"><header><div><span>선호 민감도</span><h3>중요도를 바꾸면 선호 순위가 어떻게 달라질까요?</h3></div><select value={forecast.criterionId} onChange={(event) => setSelected(event.target.value)} aria-label="시나리오 기준 선택">{result.scenarioForecasts.map((item) => <option key={item.criterionId} value={item.criterionId}>{item.criterionName}</option>)}</select></header><div className="scenario-svg-wrap"><svg viewBox="0 0 720 260" role="img" aria-label={`${forecast.criterionName} 가중치 변화에 따른 선택지 점수 그래프`}><g className="chart-grid">{[20, 40, 60, 80, 100].map((score) => <g key={score}><line x1="52" x2="682" y1={y(score)} y2={y(score)} /><text x="12" y={y(score) + 4}>{score}</text></g>)}</g>{result.options.map((option, index) => { const points = forecast.points.map((point) => ({ x: x(point.weightPercent), y: y(point.optionScores[option.id] ?? 0), score: point.optionScores[option.id] ?? 0, weight: point.weightPercent })); return <g key={option.id} style={{ color: colors[index % colors.length] }}><polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} /><g>{points.map((point) => <circle key={point.weight} cx={point.x} cy={point.y} r={point.weight === forecast.currentWeightPercent ? 6 : 4}><title>{`${option.name}: 가중치 ${point.weight}%, ${point.score}점`}</title></circle>)}</g></g>; })}<line className="current-weight-line" x1={x(forecast.currentWeightPercent)} x2={x(forecast.currentWeightPercent)} y1="28" y2="226" /><text className="current-weight-label" x={x(forecast.currentWeightPercent) + 6} y="24">현재 {forecast.currentWeightPercent}%</text>{forecast.points.map((point) => <text className="x-label" key={point.weightPercent} x={x(point.weightPercent)} y="246">{point.weightPercent}%</text>)}</svg></div><div className="chart-legend">{result.options.map((option, index) => <span key={option.id}><i style={{ background: colors[index % colors.length] }} />{option.name}</span>)}</div></section>;
 }
 
 const insightLabels = { KEY_DRIVER: "핵심 동인", TRADE_OFF: "트레이드오프", RISK: "주의할 위험", MISSING_INFORMATION: "추가 정보" };

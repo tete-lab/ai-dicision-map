@@ -44,6 +44,7 @@ data class InsightAssessmentInput(
     val criterionId: String,
     val score: BigDecimal,
     val reason: String?,
+    val sourceType: String = "USER_ASSUMPTION",
 )
 
 data class GeneratedInsight(
@@ -69,6 +70,8 @@ data class GeneratedOptionProfile(
     val optionId: String,
     val pros: List<String>,
     val cons: List<String>,
+    val bestWhen: String = "",
+    val evidenceRefs: List<String> = emptyList(),
 )
 
 data class GeneratedVerdict(
@@ -76,6 +79,10 @@ data class GeneratedVerdict(
     val rationale: String,
     val encouragement: String,
     val confidence: NarrativeConfidence,
+    val recommendedOptionId: String? = null,
+    val nextAction: String = "",
+    val practicalAlternative: String = "",
+    val evidenceRefs: List<String> = emptyList(),
 )
 
 data class GeneratedActionStep(

@@ -31,23 +31,41 @@ class LlmInsightParserTest {
         }
     }
 
+    @Test
+    fun `rejects numeric score paraphrases instead of useful advice`() {
+        assertThrows<MalformedLlmResponseException> {
+            parser.parse(validJson().replace("성장 기준과 사용자의 기대가 같은 방향입니다.", "이직이 80점이라 유리합니다."))
+        }
+    }
+
+    @Test
+    fun `requires an actionable alternative`() {
+        assertThrows<MalformedLlmResponseException> {
+            parser.parse(validJson().replace("퇴사 전에 사내 역할 전환이 가능한지도 알아보세요.", ""))
+        }
+    }
+
     private fun validJson() = """
         {
           "verdict": {
             "headline": "이직 쪽을 작게 시험해봐도 좋아요.",
             "rationale": "성장 기준과 사용자의 기대가 같은 방향입니다.",
             "encouragement": "면담 한 번으로 가능성을 먼저 확인해보세요.",
-            "confidence": "MEDIUM"
+            "confidence": "MEDIUM",
+            "recommendedOptionId": "change_job",
+            "nextAction": "채용 담당자에게 실제 역할 범위를 확인해보세요.",
+            "practicalAlternative": "퇴사 전에 사내 역할 전환이 가능한지도 알아보세요.",
+            "evidenceRefs": ["새로운 역할을 원한다"]
           },
           "optionProfiles": [
-            {"optionId": "stay", "pros": ["안정성이 유지됩니다.", "전환 비용이 없습니다."], "cons": ["성장 속도가 느릴 수 있습니다.", "역할 변화가 제한적입니다."]},
-            {"optionId": "change_job", "pros": ["새 역할에서 성장할 수 있습니다.", "보상 상승 가능성이 있습니다."], "cons": ["새 조직 적응이 필요합니다.", "제안 조건에 불확실성이 있습니다."]}
+            {"optionId": "stay", "bestWhen": "현재 조직에서 역할을 바꿀 수 있을 때", "evidenceRefs": [], "pros": ["익숙한 환경을 유지할 수 있습니다.", "이직 준비 부담을 미룰 수 있습니다."], "cons": ["성장 속도가 느릴 수 있습니다.", "역할 변화 가능성을 확인해야 합니다."]},
+            {"optionId": "change_job", "bestWhen": "새 역할과 조건을 실제 확인했을 때", "evidenceRefs": ["새로운 역할을 원한다"], "pros": ["새 역할에서 성장할 수 있습니다.", "원하는 업무에 도전할 가능성이 있습니다."], "cons": ["새 조직 적응이 필요합니다.", "제안 조건에 불확실성이 있습니다."]}
           ],
           "insights": [
             {
               "type": "KEY_DRIVER",
               "title": "성장 기대",
-              "content": "이직 선택의 성장 점수가 높습니다.",
+              "content": "새로운 역할을 원한다는 기대를 실제 담당 업무로 확인해보세요.",
               "evidenceRefs": ["새로운 역할을 원한다"],
               "assumptionRefs": [],
               "confidence": "MEDIUM",

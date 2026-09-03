@@ -16,7 +16,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; color: var(--ink); background: var(--canvas); font-family: Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; -webkit-font-smoothing: antialiased; }
 button, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
@@ -769,4 +769,36 @@ tfoot { background: #f5f6f8; }
   color: #544b80;
   font-size: 14px;
   line-height: 1.6;
+}
+
+/* Contain wide tables/maps within their cards, not the mobile viewport. */
+.workspace, .workspace-body, .conversation-card, .collected-state,
+.result-layout, .result-dashboard, .result-side, .comparison-panel,
+.option-profile-grid, .table-wrap, .score-details { min-width: 0; max-width: 100%; }
+.table-wrap { overscroll-behavior-x: contain; }
+.collection-messages { overscroll-behavior: contain; }
+.recommendation-strip.advice-first { grid-template-columns: minmax(0, 1fr); }
+.practical-advice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 28px 24px; }
+.practical-advice article { border: 1px solid #e6e0fa; border-radius: 16px; padding: 18px; background: #f8f6ff; }
+.practical-advice span, .advice-evidence b { color: #6046df; font-size: 14px; }
+.practical-advice h3 { margin: 8px 0 0; font-size: 17px; line-height: 1.65; }
+.advice-evidence { margin-top: 18px; padding: 16px; border-radius: 12px; background: #f6f7fa; }
+.advice-evidence small { color: #666; }
+.narrative-notice { margin: 20px; padding: 18px; border: 1px solid #e9d7a9; border-radius: 14px; background: #fffaf0; line-height: 1.6; }
+.narrative-notice p { margin: 8px 0; }
+.narrative-notice button { padding: 10px 16px; border-radius: 10px; border: 1px solid #c5b8ee; background: white; color: #6046df; }
+.score-details { margin-top: 24px; }
+.score-details summary { cursor: pointer; padding: 16px; border-radius: 12px; background: #f5f4f9; font-weight: 600; }
+.score-details > p { font-size: 14px; color: #64606c; line-height: 1.6; }
+@media (max-width: 767px), (pointer: coarse) {
+  /* iOS focus zoom is triggered by controls smaller than 16px. Keep pinch zoom available. */
+  .composer textarea, input, select, textarea, .scenario-forecast select { font-size: 16px; }
+}
+@media (max-width: 767px) {
+  .practical-advice { grid-template-columns: minmax(0, 1fr); padding: 0 14px 16px; }
+  .option-profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .table-wrap { width: 100%; }
+  .table-wrap th:first-child { position: sticky; left: 0; z-index: 1; background: #f7f6fb; }
+  .narrative-notice { margin: 14px; }
+  .scenario-forecast select { width: 100%; max-width: 100%; }
 }

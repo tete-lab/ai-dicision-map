@@ -19,11 +19,15 @@ class LlmInsightJsonSchema(objectMapper: ObjectMapper) {
             "verdict": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["headline", "rationale", "encouragement", "confidence"],
+              "required": ["headline", "rationale", "encouragement", "confidence", "recommendedOptionId", "nextAction", "practicalAlternative", "evidenceRefs"],
               "properties": {
                 "headline": {"type": "string"},
                 "rationale": {"type": "string"},
                 "encouragement": {"type": "string"},
+                "recommendedOptionId": {"type": ["string", "null"]},
+                "nextAction": {"type": "string"},
+                "practicalAlternative": {"type": "string"},
+                "evidenceRefs": {"type": "array", "items": {"type": "string"}},
                 "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]}
               }
             },
@@ -34,9 +38,11 @@ class LlmInsightJsonSchema(objectMapper: ObjectMapper) {
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["optionId", "pros", "cons"],
+                "required": ["optionId", "pros", "cons", "bestWhen", "evidenceRefs"],
                 "properties": {
                   "optionId": {"type": "string"},
+                  "bestWhen": {"type": "string"},
+                  "evidenceRefs": {"type": "array", "items": {"type": "string"}},
                   "pros": {"type": "array", "minItems": 2, "maxItems": 3, "items": {"type": "string"}},
                   "cons": {"type": "array", "minItems": 2, "maxItems": 3, "items": {"type": "string"}}
                 }
@@ -125,13 +131,20 @@ class LlmInsightParser(
         if (response.insights.map { it.priority }.distinct().size != response.insights.size) {
             throw MalformedLlmResponseException("AI insight priorities must be unique")
         }
-        if (response.optionProfiles.map { it.optionId }.distinct().size != response.optionProfiles.size ||
+        if (response.optionProfiles.size !in 2..8 || response.optionProfiles.map { it.optionId }.distinct().size != response.optionProfiles.size ||
             response.optionProfiles.any { it.pros.size !in 2..3 || it.cons.size !in 2..3 }
         ) {
             throw MalformedLlmResponseException("AI option profiles must contain unique options with concrete pros and cons")
         }
         if (response.actionPlan.map { it.order }.distinct().size != response.actionPlan.size) {
             throw MalformedLlmResponseException("AI action order values must be unique")
+        }
+        val advice = listOf(response.verdict.headline, response.verdict.rationale,
+            response.verdict.nextAction, response.verdict.practicalAlternative) +
+            response.optionProfiles.flatMap { it.pros + it.cons + it.bestWhen } +
+            response.insights.map { it.content }
+        if (advice.any { it.isBlank() } || advice.any { Regex("\\d+(?:\\.\\d+)?\\s*점").containsMatchIn(it) }) {
+            throw MalformedLlmResponseException("Narrative must explain concrete consequences, not numeric score differences")
         }
         return response.copy(
             insights = response.insights.sortedBy { it.priority },
