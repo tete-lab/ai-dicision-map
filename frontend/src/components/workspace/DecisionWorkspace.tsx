@@ -17,6 +17,7 @@ import {
 import { scenarios } from "@/lib/scenarios";
 import { withResponsePacing } from "@/lib/responseTiming";
 import { DecisionMapGraph } from "./DecisionMapGraph";
+import { SiteFooter } from "./SiteFooter";
 
 type Stage = 1 | 2 | 3 | 4;
 type ApiStatus = "checking" | "online" | "offline";
@@ -99,6 +100,7 @@ export function DecisionWorkspace() {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [responseMode, setResponseMode] = useState<"AI" | "GUIDED" | "FALLBACK">("GUIDED");
   const conversationEpoch = useRef(0);
+  const sendLock = useRef(false);
   const [suggestionMode, setSuggestionMode] = useState<"SINGLE" | "ORDERED">("SINGLE");
   const [suggestedAnswers, setSuggestedAnswers] = useState<SuggestedAnswer[]>([]);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -147,8 +149,13 @@ export function DecisionWorkspace() {
 
   async function continueConversation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const message = chatInput.trim();
-    if (!message || !sessionId || conversationLoading) return;
+    await sendConversationMessage(chatInput);
+  }
+
+  async function sendConversationMessage(rawMessage: string) {
+    const message = rawMessage.trim();
+    if (!message || !sessionId || conversationLoading || sendLock.current) return;
+    sendLock.current = true;
     const id = messageId("user");
     setChatMessages((current) => [...current.filter((item) => item.status !== "failed"), { id, role: "user", content: message, status: "sending" }]);
     setChatInput(""); setConversationLoading(true); setConversationError(null); setAnalysisError(null);
@@ -164,7 +171,7 @@ export function DecisionWorkspace() {
       if (epoch !== conversationEpoch.current) return;
       setChatMessages((current) => current.map((item) => item.id === id ? { ...item, status: "failed" as const } : item));
       setChatInput(message); setConversationError(toConversationError(error));
-    } finally { if (epoch === conversationEpoch.current) setConversationLoading(false); }
+    } finally { if (epoch === conversationEpoch.current) { sendLock.current = false; setConversationLoading(false); } }
   }
 
   async function runAnalysis() {
@@ -211,6 +218,7 @@ export function DecisionWorkspace() {
 
   function resetDemo() {
     conversationEpoch.current += 1;
+    sendLock.current = false;
     setResponseMode("GUIDED");
     setStage(1); setDecision(""); setSubmittedDecision(""); setSessionId(null); setDecisionState(null); setChatMessages([]); setChatInput(""); setConversationLoading(false); setConversationError(null); setSuggestionMode("SINGLE"); setSuggestedAnswers([]); setAnalysisLoading(false); setAnalysisError(null); setAnalysisStep(0); setAssessmentScores({}); setDecisionResult(null); setResultTab("map");
   }
@@ -227,11 +235,11 @@ export function DecisionWorkspace() {
         </header>
 
         {stage === 1 && <QuestionStage decision={decision} setDecision={setDecision} submittedDecision={submittedDecision} state={decisionState} loading={conversationLoading} error={conversationError} onSubmit={submitDecision} />}
-        {stage === 2 && <><div className="response-mode-notice" role="status">{responseMode === "FALLBACK" ? "AI 연결이 원활하지 않아 기본 안내로 진행 중입니다. 입력은 저장되며, 맞춤 AI 분석에는 서버 API 설정 확인이 필요합니다." : responseMode === "GUIDED" ? "기본 안내로 선택지를 정리하고 있어요." : "AI가 답변 내용을 반영하고 있어요."}</div><CollectionStage decision={submittedDecision} messages={chatMessages} state={decisionState} suggestionMode={suggestionMode} suggestedAnswers={suggestedAnswers} input={chatInput} setInput={setChatInput} loading={conversationLoading} error={analysisError ?? conversationError} onSubmit={continueConversation} scores={assessmentScores} onScoreChange={(key, value) => setAssessmentScores((current) => ({ ...current, [key]: value }))} onAnalyze={runAnalysis} /></>}
+        {stage === 2 && <><div className="response-mode-notice" role="status">{responseMode === "FALLBACK" ? "AI 연결이 원활하지 않아 기본 안내로 진행 중입니다. 입력은 저장되며, 맞춤 AI 분석에는 서버 API 설정 확인이 필요합니다." : responseMode === "GUIDED" ? "기본 안내로 선택지를 정리하고 있어요." : "AI가 답변 내용을 반영하고 있어요."}</div><CollectionStage decision={submittedDecision} messages={chatMessages} state={decisionState} suggestionMode={suggestionMode} suggestedAnswers={suggestedAnswers} input={chatInput} setInput={setChatInput} loading={conversationLoading} error={analysisError ?? conversationError} onSubmit={continueConversation} onAnswer={sendConversationMessage} scores={assessmentScores} onScoreChange={(key, value) => setAssessmentScores((current) => ({ ...current, [key]: value }))} onAnalyze={runAnalysis} /></>}
         {stage === 3 && <AnalysisStage progress={analysisStep} loading={analysisLoading} onShowResult={() => decisionResult && setStage(4)} />}
         {stage === 4 && decisionResult && <ResultStage activeTab={resultTab} setActiveTab={setResultTab} result={decisionResult} retrying={analysisLoading} onRetry={retryNarrative} />}
 
-        <footer className="workspace-footer"><span>망설임을 근거 있는 다음 행동으로 바꿔드립니다.</span><span>사용자 입력 · AI 추론 · 사용자 가정을 분리해 표시합니다.</span></footer>
+        <SiteFooter />
       </section>
     </main>
   );
@@ -275,7 +283,7 @@ function DecisionSnapshot({ hasDecision, state }: { hasDecision: boolean; state:
   return <aside className="decision-snapshot" aria-label="현재 결정 상태"><header><div><span>DECISION STATE</span><h2>현재 결정 상태</h2></div><span className="live-pill">LIVE</span></header><div className="progress-block"><div><span>정보 수집 진행률</span><strong>{progress}%</strong></div><div className="progress-track"><i style={{ width: `${Math.max(progress, 4)}%` }} /></div></div><div className="state-empty"><span><Compass size={27} /></span><h3>{state?.decisionTitle ?? (hasDecision ? "결정 주제를 확인했어요" : "아직 수집된 정보가 없어요")}</h3><p>{state?.summary ?? (hasDecision ? "선택지와 판단 기준을 구체화하고 있어요." : "첫 메시지를 보내면 AI가 결정의 핵심을 하나씩 구조화합니다.")}</p></div><ul className="state-checklist"><li className={state || hasDecision ? "done" : "current"}><span>{state || hasDecision ? <Check size={14} /> : "1"}</span>결정 주제 파악</li><li className={state?.options.length ? "done" : ""}><span>{state?.options.length ? <Check size={14} /> : "2"}</span>선택지 확인</li><li className={state?.criteria.length ? "done" : ""}><span>{state?.criteria.length ? <Check size={14} /> : "3"}</span>중요 기준 수집</li><li className={state?.readyToAnalyze ? "done" : ""}><span>{state?.readyToAnalyze ? <Check size={14} /> : "4"}</span>분석 준비 완료</li></ul></aside>;
 }
 
-function CollectionStage({ decision, messages, state, suggestionMode, suggestedAnswers, input, setInput, loading, error, onSubmit, scores, onScoreChange, onAnalyze }: { decision: string; messages: ChatMessage[]; state: ApiDecisionState | null; suggestionMode: "SINGLE" | "ORDERED"; suggestedAnswers: SuggestedAnswer[]; input: string; setInput: (value: string) => void; loading: boolean; error: string | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void; scores: Record<string, number>; onScoreChange: (key: string, value: number) => void; onAnalyze: () => void }) {
+function CollectionStage({ decision, messages, state, suggestionMode, suggestedAnswers, input, setInput, loading, error, onSubmit, onAnswer, scores, onScoreChange, onAnalyze }: { decision: string; messages: ChatMessage[]; state: ApiDecisionState | null; suggestionMode: "SINGLE" | "ORDERED"; suggestedAnswers: SuggestedAnswer[]; input: string; setInput: (value: string) => void; loading: boolean; error: string | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onAnswer: (value: string) => void; scores: Record<string, number>; onScoreChange: (key: string, value: number) => void; onAnalyze: () => void }) {
   const progress = state?.progress ?? 20;
   const complete = state?.readyToAnalyze ?? false;
   const endRef = useRef<HTMLDivElement>(null);
@@ -284,10 +292,10 @@ function CollectionStage({ decision, messages, state, suggestionMode, suggestedA
     const container = endRef.current?.parentElement;
     container?.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
-  return <div className="workspace-body collection-layout"><section className="conversation-card collection-card"><AssistantHeader label="2단계 · 정보 수집" /><div className="collection-progress"><div><span>{complete ? "분석 준비 완료" : `핵심 질문 ${state?.askedQuestions?.length ?? 1}/최대 12`}</span><strong>{progress}%</strong></div><div className="segmented-progress">{Array.from({ length: 6 }).map((_, index) => <i key={index} className={index < Math.ceil(progress / 17) ? "filled" : ""} />)}</div></div><div className="collection-messages" aria-live="polite">{messages.length ? messages.map((message) => message.role === "user" ? <UserMessage key={message.id} message={message.content} status={message.status} /> : <div className="assistant-question" key={message.id}><span><Bot size={16} /></span><p>{message.content}</p></div>) : decision && <UserMessage message={decision} status="sent" />}{loading && <div className="assistant-thinking"><span><Sparkles size={17} /></span><div><strong>답변을 잘 받았어요</strong><p>이미 확인한 내용은 건너뛰고 다음 핵심을 정리하고 있어요.</p><i><b /><b /><b /></i></div></div>}{complete && <div className="ready-message"><CheckCircle2 size={20} /><div><strong>질문은 여기까지면 충분해요.</strong><p>각 기준은 양쪽 선택지를 한 번만 비교하면 됩니다.</p></div></div>}<div ref={endRef} /></div>{error && <ConversationError message={error} />}<div className="answer-panel chat-answer-panel">{!complete ? <>{!loading && <SuggestionBadges key={latestQuestion} question={latestQuestion} state={state} mode={suggestionMode} suggestions={suggestedAnswers} setInput={setInput} />}<MessageComposer id="collection-message" decision={input} setDecision={setInput} onSubmit={onSubmit} loading={loading} /></> : <AssessmentPanel state={state} scores={scores} onScoreChange={onScoreChange} onAnalyze={onAnalyze} />}</div></section><CollectedState state={state} /></div>;
+  return <div className="workspace-body collection-layout"><section className="conversation-card collection-card"><AssistantHeader label="2단계 · 정보 수집" /><div className="collection-progress"><div><span>{complete ? "분석 준비 완료" : `핵심 질문 ${state?.askedQuestions?.length ?? 1}/최대 12`}</span><strong>{progress}%</strong></div><div className="segmented-progress">{Array.from({ length: 6 }).map((_, index) => <i key={index} className={index < Math.ceil(progress / 17) ? "filled" : ""} />)}</div></div><div className="collection-messages" aria-live="polite">{messages.length ? messages.map((message) => message.role === "user" ? <UserMessage key={message.id} message={message.content} status={message.status} /> : <div className="assistant-question" key={message.id}><span><Bot size={16} /></span><p>{message.content}</p></div>) : decision && <UserMessage message={decision} status="sent" />}{loading && <div className="assistant-thinking"><span><Sparkles size={17} /></span><div><strong>답변을 잘 받았어요</strong><p>이미 확인한 내용은 건너뛰고 다음 핵심을 정리하고 있어요.</p><i><b /><b /><b /></i></div></div>}{complete && <div className="ready-message"><CheckCircle2 size={20} /><div><strong>질문은 여기까지면 충분해요.</strong><p>각 기준은 양쪽 선택지를 한 번만 비교하면 됩니다.</p></div></div>}<div ref={endRef} /></div>{error && <ConversationError message={error} />}<div className="answer-panel chat-answer-panel">{!complete ? <>{!loading && <SuggestionBadges key={latestQuestion} question={latestQuestion} state={state} mode={suggestionMode} suggestions={suggestedAnswers} setInput={setInput} onAnswer={onAnswer} />}<MessageComposer id="collection-message" decision={input} setDecision={setInput} onSubmit={onSubmit} loading={loading} /></> : <AssessmentPanel state={state} scores={scores} onScoreChange={onScoreChange} onAnalyze={onAnalyze} />}</div></section><CollectedState state={state} /></div>;
 }
 
-function SuggestionBadges({ question, state, mode, suggestions, setInput }: { question: string; state: ApiDecisionState | null; mode: "SINGLE" | "ORDERED"; suggestions: SuggestedAnswer[]; setInput: (value: string) => void }) {
+export function SuggestionBadges({ question, state, mode, suggestions, setInput, onAnswer }: { question: string; state: ApiDecisionState | null; mode: "SINGLE" | "ORDERED"; suggestions: SuggestedAnswer[]; setInput: (value: string) => void; onAnswer: (value: string) => void }) {
   const fallback = getSuggestionConfig(question, state);
   const config: SuggestionConfig = suggestions.length === 4 ? { mode: mode === "ORDERED" ? "priority" : "single", label: mode === "ORDERED" ? "중요한 순서대로 눌러주세요" : "지금 생각과 가까운 답을 골라보세요", options: suggestions } : fallback;
   const [order, setOrder] = useState<string[]>([]);
@@ -296,9 +304,11 @@ function SuggestionBadges({ question, state, mode, suggestions, setInput }: { qu
   function select(option: SuggestedAnswer) {
     if (option.value === "__custom__") { setInput(""); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus({ preventScroll: true })); return; }
     const naturalValue = state?.options.find((item) => item.id === option.value)?.name ?? option.value;
-    if (config.mode === "single") { setInput(naturalValue); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus({ preventScroll: true })); return; }
+    if (config.mode === "single") { setInput(naturalValue); onAnswer(naturalValue); return; }
     const next = order.includes(naturalValue) ? order.filter((item) => item !== naturalValue) : [...order, naturalValue];
-    setOrder(next); setInput(next.length ? `우선순위는 ${next.map((item, index) => `${index + 1}순위 ${item}`).join(", ")}입니다.` : "");
+    const answer = next.length ? `우선순위는 ${next.map((item, index) => `${index + 1}순위 ${item}`).join(", ")}입니다.` : "";
+    setOrder(next); setInput(answer);
+    if (next.length === config.options.filter((item) => item.value !== "__custom__").length) onAnswer(answer);
   }
   return <div className="suggestion-box"><strong>{config.label}</strong><div>{config.options.map((option) => { const naturalValue = state?.options.find((item) => item.id === option.value)?.name ?? option.value; const naturalLabel = state?.options.find((item) => item.id === option.label)?.name ?? option.label; const selectedIndex = order.indexOf(naturalValue); return <button className={selectedIndex >= 0 ? "selected" : ""} key={`${option.label}-${option.value}`} type="button" onClick={() => select(option)}>{selectedIndex >= 0 && <b>{selectedIndex + 1}</b>}{naturalLabel}</button>; })}</div></div>;
 }
@@ -321,7 +331,7 @@ function StateGroup({ title, items, tone }: { title: string; items: string[]; to
 
 function AnalysisStage({ progress, loading, onShowResult }: { progress: number; loading: boolean; onShowResult: () => void }) {
   const complete = !loading && progress >= analysisItems.length;
-  return <div className="analysis-layout"><section className="analysis-card" aria-live="polite"><div className="analysis-visual" aria-hidden="true">{Array.from({ length: 7 }).map((_, index) => <i key={index} />)}</div><span className="analysis-kicker">DECISION ENGINE</span><h2>{complete ? "분석이 완료됐어요" : "실제 API 결과를 계산하고 있어요"}</h2><p>{complete ? "선택지별 점수와 근거를 결정 지도로 정리했습니다." : "입력한 평가를 정규화하고 결정 지도를 먼저 만드는 중입니다."}</p><div className="analysis-list">{analysisItems.map((item, index) => <div className={index < progress ? "done" : index === progress ? "current" : "pending"} key={item}><span>{index < progress ? <Check size={14} /> : index === progress ? <Sparkles size={14} /> : <Circle size={11} />}</span><strong>{item}</strong>{index < progress && <small>완료</small>}{index === progress && !complete && <small>진행 중</small>}</div>)}</div>{complete ? <button className="primary-action wide" type="button" onClick={onShowResult}>결정 지도 확인하기 <ArrowRight size={17} /></button> : <small className="analysis-time">점수 결과를 먼저 보여드리고 AI 설명은 이어서 보강합니다.</small>}</section></div>;
+  return <div className="analysis-layout"><section className="analysis-card" aria-live="polite"><div className="analysis-visual" aria-hidden="true">{Array.from({ length: 7 }).map((_, index) => <i key={index} />)}</div><span className="analysis-kicker">DECISION ENGINE</span><h2>{complete ? "분석이 완료됐어요" : "대안과 근거를 함께 검토하고 있어요"}</h2><p>{complete ? "선택지별 점수와 근거를 결정 지도로 정리했습니다." : "선호 경향을 계산하고, AI가 상황에 맞는 장단점과 다음 행동을 정리합니다."}</p><div className="analysis-list">{analysisItems.map((item, index) => <div className={index < progress ? "done" : index === progress ? "current" : "pending"} key={item}><span>{index < progress ? <Check size={14} /> : index === progress ? <Sparkles size={14} /> : <Circle size={11} />}</span><strong>{item}</strong>{index < progress && <small>완료</small>}{index === progress && !complete && <small>진행 중</small>}</div>)}</div>{complete ? <button className="primary-action wide" type="button" onClick={onShowResult}>결정 지도 확인하기 <ArrowRight size={17} /></button> : <small className="analysis-time">AI 해석이 완료되면 결과 화면으로 이동합니다.</small>}</section></div>;
 }
 
 export function ResultStage({ activeTab, setActiveTab, result, retrying = false, onRetry }: { activeTab: ResultTab; setActiveTab: (tab: ResultTab) => void; result: DecisionResult; retrying?: boolean; onRetry?: () => void }) {
