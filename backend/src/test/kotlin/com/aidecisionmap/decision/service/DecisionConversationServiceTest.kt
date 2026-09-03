@@ -32,6 +32,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class DecisionConversationServiceTest {
     private val sessionRepository = mock<DecisionSessionRepository>()
@@ -138,6 +139,136 @@ class DecisionConversationServiceTest {
         assertTrue(response.state.readyToAnalyze)
         assertEquals("", response.state.nextQuestion)
         assertEquals(12, response.state.askedQuestions.size)
+        verifyNoInteractions(llmClient)
+    }
+
+    @Test
+    fun `initial meal already contains the two named choices`() {
+        val response = service.createDecision("짜장면을 먹을지 탕수육을 먹을지 고민이야")
+        assertEquals(listOf("짜장면", "탕수육"), response.state.options.map { it.name })
+        assertTrue(response.state.nextQuestion.contains("메뉴"))
+        assertTrue(response.suggestedAnswers.any { it.value == "맛과 맵기" })
+        assertEquals("GUIDED", response.responseMode)
+        verifyNoInteractions(llmClient)
+    }
+
+    @Test
+    fun `fallback can learn unknown options then finish without repeating`() {
+        val initial = service.createDecision("진로를 결정하고 싶어")
+        bindSession(initial.state)
+        whenever(llmClient.generateTurn(any())).thenThrow(MalformedLlmResponseException("offline"))
+        val options = service.addMessage("flow", "선택지: 대학원 진학 / 취업 / 창업")
+        assertEquals(listOf("대학원 진학", "취업", "창업"), options.state.options.map { it.name })
+        assertEquals("FALLBACK", options.responseMode)
+        val first = service.addMessage("flow", "비용")
+        val second = service.addMessage("flow", "성장 가능성")
+        assertNotEquals(options.state.nextQuestion, first.state.nextQuestion)
+        assertTrue(second.state.readyToAnalyze, "first=${first.state}; second=${second.state}")
+        assertTrue(second.state.nextQuestion.isEmpty())
+        assertTrue(second.suggestedAnswers.isEmpty())
+    }
+
+    @Test
+    fun `fallback repairs meal choices and asks only for missing criteria`() {
+        bindSession(service.createDecision("짜장면을 먹을지 탕수육을 먹을지 고민이야").state)
+        whenever(llmClient.generateTurn(any())).thenThrow(MalformedLlmResponseException("offline"))
+        val changed = service.addMessage("flow", "짜장면과 짬뽕")
+        assertEquals(listOf("짜장면", "짬뽕"), changed.state.options.map { it.name })
+        val first = service.addMessage("flow", "맵기")
+        val ready = service.addMessage("flow", "배부름")
+        assertTrue(ready.state.readyToAnalyze)
+        assertEquals(listOf("맛과 맵기", "양과 포만감"), ready.state.criteria.map { it.name })
+        assertNotEquals(first.state.nextQuestion, changed.state.nextQuestion)
+        assertFalse(ready.state.options.any { it.name.contains("유지") })
+    }
+
+    @Test
+    fun `repeated vague meal answers end by the fourth question`() {
+        bindSession(service.createDecision("짜장면과 짬뽕 중 뭐 먹을까?").state)
+        whenever(llmClient.generateTurn(any())).thenThrow(MalformedLlmResponseException("offline"))
+        val questions = mutableListOf<String>()
+        var ready = false
+        for (index in 1..4) {
+            val response = service.addMessage("flow", "네?")
+            assertTrue(response.state.criteria.none { it.name == "네?" })
+            if (response.state.readyToAnalyze) { ready = true; break }
+            assertTrue(response.state.nextQuestion.isNotBlank())
+            assertFalse(questions.contains(response.state.nextQuestion))
+            questions += response.state.nextQuestion
+        }
+        assertTrue(ready)
+    }
+
+    @Test
+    fun `old stalled session uses real message count for the hard stop`() {
+        bindSession(sampleTurn().state.copy(askedQuestions = emptyList(), nextQuestion = ""))
+        whenever(messageRepository.countBySessionAndRole(any(), any())).thenReturn(15L)
+        val response = service.addMessage("flow", "시간이 중요해요")
+        assertTrue(response.state.readyToAnalyze)
+        assertTrue(response.state.criteria.all { it.sourceType == DecisionSourceType.AI_INFERENCE })
+        verifyNoInteractions(llmClient)
+    }
+
+    @Test
+    fun `missing options at limit asks for explicit input instead of inventing choices`() {
+        bindSession(service.createDecision("고민을 정리하고 싶어요").state)
+        whenever(messageRepository.countBySessionAndRole(any(), any())).thenReturn(15L)
+        val response = service.addMessage("flow", "모르겠어요")
+        assertTrue(response.state.options.isEmpty())
+        assertFalse(response.state.readyToAnalyze)
+        assertTrue(response.state.nextQuestion.isEmpty())
+        assertTrue(response.suggestedAnswers.isEmpty())
+        val recovered = service.addMessage("flow", "선택지: 자격증 공부 / 대학원 진학")
+        assertEquals(listOf("자격증 공부", "대학원 진학"), recovered.state.options.map { it.name })
+        assertTrue(recovered.state.readyToAnalyze)
+        verifyNoInteractions(llmClient)
+    }
+
+    private fun bindSession(state: DecisionState) {
+        val session = DecisionSessionEntity(publicId = "flow", title = state.decisionTitle, stage = state.stage,
+            summary = state.summary, progress = state.progress, stateJson = objectMapper.writeValueAsString(state), promptVersion = "test-v1")
+        whenever(sessionRepository.findByPublicId("flow")).thenReturn(session)
+    }
+
+    @Test
+    fun `exhausted recovery questions finish instead of returning blank prompts`() {
+        bindSession(service.createDecision("아이폰 vs 갤럭시").state)
+        whenever(llmClient.generateTurn(any())).thenThrow(MalformedLlmResponseException("offline"))
+        val questions = mutableSetOf<String>()
+        var ready = false
+        repeat(12) {
+            if (!ready) {
+                val response = service.addMessage("flow", "모르겠어요")
+                ready = response.state.readyToAnalyze
+                if (!ready) {
+                    assertTrue(response.state.nextQuestion.isNotBlank())
+                    assertTrue(questions.add(response.state.nextQuestion))
+                }
+            }
+        }
+        assertTrue(ready)
+    }
+
+    @Test
+    fun `everyday question cap also applies to successful AI responses`() {
+        val meal = service.createDecision("짜장면 vs 짬뽕").state.copy(askedQuestions = (1..4).map { "질문 $it" })
+        bindSession(meal)
+        val response = service.addMessage("flow", "오늘은 짬뽕이 좋아요")
+        assertTrue(response.state.readyToAnalyze)
+        assertEquals(listOf("짜장면", "짬뽕"), response.state.options.map { it.name })
+        verifyNoInteractions(llmClient)
+    }
+
+    @Test
+    fun `legacy meal session recovers latest explicit alternatives from stored answers`() {
+        bindSession(service.createDecision("짜장면을 먹을지 탕수육을 먹을지 고민이야").state.copy(
+            options = emptyList(), nextQuestion = "", askedQuestions = emptyList(),
+            knownFacts = listOf("사용자 답변: 짜장면과 탕수육", "사용자 답변: 짜장면과 짬뽕", "사용자 답변: 가격은 짬뽕이 500원 더 비쌈"),
+        ))
+        whenever(messageRepository.countBySessionAndRole(any(), any())).thenReturn(15L)
+        val response = service.addMessage("flow", "비교해줘")
+        assertEquals(listOf("짜장면", "짬뽕"), response.state.options.map { it.name })
+        assertTrue(response.state.readyToAnalyze)
         verifyNoInteractions(llmClient)
     }
 

@@ -18,6 +18,7 @@ data class DecisionTurnResponse(
     val suggestionMode: SuggestedAnswerMode,
     val suggestedAnswers: List<SuggestedAnswer>,
     val state: DecisionState,
+    val responseMode: String = "AI",
 )
 
 data class DecisionStateResponse(

@@ -51,7 +51,7 @@ class DecisionConversationService(
 
         val turn = initialTurn(cleanMessage)
         persistTurn(session, turn)
-        return turn.toResponse(session.publicId)
+        return turn.toResponse(session.publicId, "GUIDED")
     }
 
     @Transactional
@@ -60,25 +60,39 @@ class DecisionConversationService(
         val previousState = readState(session)
         val cleanMessage = message.trim()
         messageRepository.save(MessageEntity(session, MessageRole.USER, cleanMessage))
-        val turn = if (previousState.askedQuestions.size >= MAX_QUESTIONS) {
-            completeAtQuestionLimit(previousState, cleanMessage)
+        // Count actual answers too: old sessions may have stopped recording questions altogether.
+        val answeredCount = maxOf(previousState.askedQuestions.size,
+            (messageRepository.countBySessionAndRole(session, MessageRole.USER) - 1).coerceAtLeast(0).toInt())
+        val recovered = recoverAnswer(previousState, cleanMessage)
+        var mode = "AI"
+        val turn = if (previousState.readyToAnalyze || answeredCount >= questionLimit(recovered)) {
+            mode = "GUIDED"
+            completeAtQuestionLimit(recovered, "")
         } else try {
-            enforceConversationPolicy(previousState, llmClient.generateTurn(
+            val generated = llmClient.generateTurn(
                 LlmTurnRequest(
                     messages = listOf(TranscriptMessage(MessageRole.USER, cleanMessage)),
                     previousState = previousState,
                 ),
-            ))
+            )
+            val options = if (recovered.options.map { it.name } != previousState.options.map { it.name }) recovered.options
+                else generated.state.options.ifEmpty { recovered.options }
+            enforceConversationPolicy(previousState, generated.copy(state = generated.state.copy(
+                options = options,
+                userLeaningOptionId = generated.state.userLeaningOptionId?.takeIf { id -> options.any { it.id == id } },
+                knownFacts = (recovered.knownFacts + generated.state.knownFacts).distinct().takeLast(20),
+            )))
         } catch (exception: RuntimeException) {
             if (exception !is LlmConfigurationException &&
                 exception !is LlmUnavailableException &&
                 exception !is MalformedLlmResponseException
             ) throw exception
             logger.warn("Using a safe conversation turn for session {} after an AI response failure", session.publicId, exception)
-            recoveryTurn(previousState, cleanMessage)
+            mode = "FALLBACK"
+            recoveryTurn(previousState, recovered)
         }
         persistTurn(session, turn)
-        return turn.toResponse(session.publicId)
+        return turn.toResponse(session.publicId, mode)
     }
 
     @Transactional(readOnly = true)
@@ -107,12 +121,17 @@ class DecisionConversationService(
         return objectMapper.readValue(stateJson, DecisionState::class.java)
     }
 
-    private fun LlmDecisionTurn.toResponse(sessionId: String) =
-        DecisionTurnResponse(sessionId, assistantMessage, suggestionMode, suggestedAnswers, state)
+    private fun LlmDecisionTurn.toResponse(sessionId: String, mode: String = "AI") =
+        DecisionTurnResponse(sessionId, assistantMessage, suggestionMode, suggestedAnswers, state, mode)
 
     private fun initialTurn(message: String): LlmDecisionTurn {
         val topic = topicFor(message)
-        val (title, options, question, suggestions) = when (topic) {
+        val explicitOptions = DecisionOptionExtractor.extract(message)
+        val (title, options, question, suggestions) = if (explicitOptions.size >= 2) {
+            InitialTemplate(message.take(120), explicitOptions,
+                if (topic == DecisionTopic.FOOD) "오늘 메뉴를 고를 때 가장 중요한 것은 무엇인가요?" else "이 선택에서 가장 중요한 기준은 무엇인가요?",
+                priorityValues(topic))
+        } else when (topic) {
             DecisionTopic.JOB -> InitialTemplate(
                 "이직 여부",
                 listOf(DecisionOption("stay", "현재 직장에 남기"), DecisionOption("change_job", "새 직장으로 이직하기")),
@@ -125,11 +144,11 @@ class DecisionConversationService(
                 "이사를 고민하게 된 가장 큰 이유는 무엇인가요?",
                 listOf("통학·통근 시간", "주거비", "공간과 생활 환경", "__custom__"),
             )
-            DecisionTopic.GENERAL -> InitialTemplate(
+            DecisionTopic.FOOD, DecisionTopic.GENERAL -> InitialTemplate(
                 message.take(120),
                 emptyList(),
                 "지금 비교하고 싶은 선택지를 두 가지 이상 알려주세요.",
-                listOf("현재 상태 유지", "새로운 선택 시도", "두 방향을 함께 비교", "__custom__"),
+                emptyList(),
             )
         }
         val answers = suggestions.toSuggestedAnswers()
@@ -156,46 +175,77 @@ class DecisionConversationService(
         )
     }
 
-    private fun recoveryTurn(previous: DecisionState, message: String): LlmDecisionTurn {
-        val facts = (previous.knownFacts + "사용자 답변: $message".take(500)).distinct().takeLast(20)
-        val collectingCriterion = previous.options.size >= 2 && previous.criteria.size < 2
-        val criteria = if (collectingCriterion && message.length <= 80 && message != "__custom__") {
-            previous.criteria + DecisionCriterion(
-                id = "criterion_${previous.criteria.size + 1}",
-                name = message,
-                weight = if (previous.criteria.isEmpty()) 0.6 else 0.4,
-                sourceType = DecisionSourceType.USER_FACT,
-                confidence = 0.9,
-            )
-        } else previous.criteria
-        val ready = previous.options.size >= 2 && criteria.size >= 2 && facts.size >= 3
-        val topic = topicFor(previous.decisionTitle)
-        val (question, values) = when {
-            ready -> "" to emptyList()
-            else -> nextUnaskedQuestion(previous.copy(criteria = criteria), topic)
-        }
+    private fun recoveryTurn(previous: DecisionState, recovered: DecisionState): LlmDecisionTurn {
+        val ready = recovered.options.size >= 2 && recovered.criteria.size >= 2 && recovered.knownFacts.size >= 3
+        val topic = topicFor(recovered.decisionTitle)
+        if (ready) return completeAtQuestionLimit(recovered, "")
+        val (question, values) = nextUnaskedQuestion(recovered, topic)
+        if (question.isBlank()) return completeAtQuestionLimit(recovered, "")
         val answers = values.toSuggestedAnswers()
-        val nextState = previous.copy(
-            stage = if (ready) DecisionStage.READY_TO_ANALYZE else if (criteria.isEmpty()) DecisionStage.COLLECTING_CRITERIA else DecisionStage.COLLECTING_INFORMATION,
-            criteria = criteria,
-            knownFacts = facts,
-            missingInformation = if (ready) emptyList() else previous.missingInformation,
-            askedQuestions = if (question.isBlank()) previous.askedQuestions else (previous.askedQuestions + question).takeLast(MAX_QUESTIONS),
-            progress = if (ready) 100 else (previous.progress + 12).coerceAtMost(85),
-            readyToAnalyze = ready,
+        val nextState = recovered.copy(
+            stage = if (recovered.options.size < 2) DecisionStage.IDENTIFYING_OPTIONS else DecisionStage.COLLECTING_INFORMATION,
+            askedQuestions = (previous.askedQuestions + question).takeLast(MAX_QUESTIONS),
+            progress = (previous.progress + 12).coerceAtMost(85),
+            readyToAnalyze = false,
             nextQuestion = question,
         )
-        val assistantMessage = if (ready) {
-            "답변은 잘 저장했어요. 필요한 핵심 기준이 모였습니다. 이제 선택지별 조건을 확인하고 분석해볼게요."
-        } else {
-            "답변은 잘 저장했어요. 흐름을 끊지 않고 한 가지만 더 확인할게요. $question"
-        }
+        val assistantMessage = "답변은 잘 저장했어요. $question"
         return LlmDecisionTurn(assistantMessage, SuggestedAnswerMode.SINGLE, answers, nextState)
+    }
+
+    private fun questionLimit(state: DecisionState): Int =
+        if (DecisionOptionExtractor.isFood(state.decisionTitle + " " + state.knownFacts.firstOrNull().orEmpty())) 4 else MAX_QUESTIONS
+
+    private fun recoverAnswer(previous: DecisionState, message: String): DecisionState {
+        val candidates = DecisionOptionExtractor.extract(message)
+        val existing = previous.options.ifEmpty {
+            // Old fallback sessions stored explicit corrections only in knownFacts.
+            previous.knownFacts.fold(DecisionOptionExtractor.extract(previous.decisionTitle)) { current, fact ->
+                val extracted = DecisionOptionExtractor.extract(fact)
+                if (extracted.size >= 2 && (current.isEmpty() ||
+                        (fact.startsWith("사용자 답변:") && extracted.any { choice -> current.any { it.name == choice.name } }))) extracted
+                else current
+            }
+        }
+        val correcting = Regex("선택지[:는 ]|후보[:는 ]|아니[,. ]|대신|바꿀|변경").containsMatchIn(message) ||
+            (message.length <= 80 && candidates.any { candidate -> existing.any { it.name == candidate.name } })
+        val replacing = candidates.size >= 2 && (existing.size < 2 || correcting || previous.nextQuestion.contains("후보를"))
+        val options = if (replacing) candidates.map { candidate ->
+            existing.find { it.name == candidate.name } ?: candidate.copy(id = "option_" + UUID.nameUUIDFromBytes(candidate.name.toByteArray()).toString().take(8))
+        } else existing
+        val optionsChanged = options.map { it.name }.toSet() != previous.options.map { it.name }.toSet()
+        val isCriterionAnswer = Regex("기준|중요|조건|이유").containsMatchIn(previous.nextQuestion)
+        val vague = Regex("^(네|네\\?|아니요|몰라요|모르겠어요|글쎄요|기타.*|어떤.*|다른 조건은 없어요|__custom__)[.!?]*$").matches(message)
+        val name = when (message.trim()) {
+            "맵기" -> "맛과 맵기"
+            "배부름" -> "양과 포만감"
+            else -> message.removeSuffix("이 가장 중요해요").removeSuffix("가 가장 중요해요").trim().take(200)
+        }
+        val criteria = if (!replacing && isCriterionAnswer && !vague && message.length in 2..80 &&
+            previous.criteria.none { normalizeQuestion(it.name) == normalizeQuestion(name) } && previous.criteria.size < 5) {
+            previous.criteria + DecisionCriterion("criterion_" + UUID.nameUUIDFromBytes(name.toByteArray()).toString().take(8), name,
+                if (previous.criteria.isEmpty()) 0.6 else 0.4, DecisionSourceType.USER_FACT, 0.9)
+        } else previous.criteria
+        val selected = if (!isCriterionAnswer && !replacing) options.singleOrNull { it.name == message.trim() } else null
+        return previous.copy(
+            options = options,
+            criteria = criteria,
+            knownFacts = (previous.knownFacts + "사용자 답변: $message".take(500)).distinct().takeLast(20),
+            summary = if (options.size >= 2) "${options.joinToString(" · ") { it.name }}을 비교하고 있어요." +
+                if (criteria.isNotEmpty()) " 중요한 기준: ${criteria.joinToString(" · ") { it.name }}" else " 중요한 기준을 확인하고 있어요."
+                else previous.summary,
+            userLeaningOptionId = selected?.id ?: previous.userLeaningOptionId?.takeIf { id -> options.any { it.id == id } },
+            userLeaningEvidence = if (selected != null) listOf("사용자가 ${selected.name} 쪽으로 마음이 간다고 직접 답함")
+                else if (optionsChanged) emptyList() else previous.userLeaningEvidence,
+            // Changed candidates need their own comparison; unchanged question history still limits fatigue.
+            readyToAnalyze = previous.readyToAnalyze && !optionsChanged,
+        )
     }
 
     private fun priorityValues(topic: DecisionTopic) = when (topic) {
         DecisionTopic.JOB -> listOf("성장 기회", "연봉과 보상", "업무 환경과 균형", "__custom__")
         DecisionTopic.MOVING -> listOf("통학·통근 시간", "주거비", "공간과 생활 환경", "__custom__")
+        DecisionTopic.FOOD -> listOf("맛과 맵기", "가격", "양과 포만감", "__custom__")
         DecisionTopic.GENERAL -> listOf("비용", "시간", "만족감과 지속 가능성", "__custom__")
     }
 
@@ -204,6 +254,7 @@ class DecisionConversationService(
     }
 
     private fun topicFor(text: String): DecisionTopic = when {
+        DecisionOptionExtractor.isFood(text) -> DecisionTopic.FOOD
         listOf("이직", "퇴사", "직장", "회사").any(text::contains) -> DecisionTopic.JOB
         listOf("이사", "집", "주거", "전학").any(text::contains) -> DecisionTopic.MOVING
         else -> DecisionTopic.GENERAL
@@ -248,15 +299,21 @@ class DecisionConversationService(
         topic: DecisionTopic,
         history: List<String> = state.askedQuestions,
     ): Pair<String, List<String>> {
-        val optionNames = state.options.take(2).map { it.name }
+        val optionNames = state.options.map { it.name }
+        val optionChoices = (optionNames.take(3) + if (optionNames.size == 2) listOf("아직 비슷해요") else emptyList()) + "__custom__"
         val candidates = buildList {
-            if (state.options.size < 2) add("실제로 비교할 두 선택지를 각각 알려주세요." to listOf("현재 상태 유지", "새로운 선택 시도", "두 방향 함께 비교", "__custom__"))
+            if (state.options.size < 2) {
+                add("비교할 후보를 ‘선택지: 후보 A / 후보 B’ 형식으로 입력해주세요." to emptyList())
+                return@buildList
+            }
             if (state.criteria.isEmpty()) add("이 결정을 내릴 때 가장 중요한 기준은 무엇인가요?" to priorityValues(topic))
-            if (state.criteria.size < 2) add("첫 번째 기준 다음으로 꼭 지키고 싶은 조건은 무엇인가요?" to priorityValues(topic))
-            if (optionNames.size == 2) {
-                add("${optionNames[0]}와 ${optionNames[1]} 중 지금 마음이 더 가는 쪽은 어디인가요?" to (optionNames + listOf("아직 비슷해요", "__custom__")))
-                add("두 선택지의 가장 현실적인 단점은 각각 무엇인가요?" to listOf("비용이나 보상", "시간과 에너지", "불확실성과 위험", "__custom__"))
-                add("결정 후 6개월을 상상하면 어느 쪽에서 후회가 더 적을 것 같나요?" to (optionNames + listOf("아직 판단하기 어려워요", "__custom__")))
+            if (state.criteria.size < 2) add("추가로 양보하기 어려운 조건 하나만 골라주세요." to priorityValues(topic).filterNot { value -> state.criteria.any { it.name == value } }.let { values ->
+                (values.filterNot { it == "__custom__" } + "다른 조건은 없어요").take(3) + "__custom__"
+            })
+            if (optionNames.size >= 2) {
+                add("${optionNames.take(3).joinToString(" · ") { it.take(80) }}${if (optionNames.size > 3) " 등" else ""} 중 지금 마음이 더 가는 쪽은 어디인가요?" to optionChoices)
+                add("각 선택지의 가장 현실적인 단점은 무엇인가요?" to listOf("비용이나 보상", "시간과 에너지", "불확실성과 위험", "__custom__"))
+                if (topic != DecisionTopic.FOOD) add("결정 후 6개월을 상상하면 어느 쪽에서 후회가 더 적을 것 같나요?" to optionChoices)
             }
             add("결정을 내리기 전에 반드시 확인해야 할 실제 정보 한 가지는 무엇인가요?" to listOf("정확한 비용", "실제 일정", "당사자·전문가 확인", "__custom__"))
             add("어떤 조건이 충족되면 바로 결정할 수 있나요?" to listOf("핵심 조건 충족", "위험이 감당 가능", "작은 시험이 성공", "__custom__"))
@@ -268,12 +325,18 @@ class DecisionConversationService(
     private fun completeAtQuestionLimit(state: DecisionState, latestAnswer: String): LlmDecisionTurn {
         val facts = if (latestAnswer.isBlank()) state.knownFacts else
             (state.knownFacts + "사용자 답변: $latestAnswer".take(500)).distinct().takeLast(20)
-        val options = state.options.ifEmpty {
-            listOf(DecisionOption("keep_current", "현재 상태 유지하기"), DecisionOption("try_change", "새로운 선택 시도하기"))
-        }.let { if (it.size == 1) it + DecisionOption("alternative", "다른 대안 선택하기") else it }
+        if (state.options.size < 2) return LlmDecisionTurn(
+            assistantMessage = "질문은 더 이어가지 않을게요. 후보를 임의로 만들지 않도록 아래 입력란에 실제 선택지 두 개 이상을 입력해주세요. 예: 선택지: 짜장면 / 짬뽕",
+            suggestionMode = SuggestedAnswerMode.SINGLE,
+            suggestedAnswers = emptyList(),
+            state = state.copy(stage = DecisionStage.IDENTIFYING_OPTIONS, knownFacts = facts,
+                nextQuestion = "", readyToAnalyze = false, missingInformation = listOf("실제 선택지 두 개 이상")),
+        )
+        val options = state.options
         val criteria = state.criteria.toMutableList().apply {
-            if (size < 2 && none { it.id == "practicality" }) add(DecisionCriterion("practicality", "비용과 실행 가능성", 0.5, DecisionSourceType.AI_INFERENCE, 0.35))
-            if (size < 2 && none { it.id == "expected_effect" }) add(DecisionCriterion("expected_effect", "기대 효과와 지속 만족도", 0.5, DecisionSourceType.AI_INFERENCE, 0.35))
+            val food = topicFor(state.decisionTitle) == DecisionTopic.FOOD
+            if (size < 2 && none { it.id == "practicality" }) add(DecisionCriterion("practicality", if (food) "가격과 포만감" else "비용과 실행 가능성", 0.5, DecisionSourceType.AI_INFERENCE, 0.35))
+            if (size < 2 && none { it.id == "expected_effect" }) add(DecisionCriterion("expected_effect", if (food) "오늘의 맛 만족도" else "기대 효과와 지속 만족도", 0.5, DecisionSourceType.AI_INFERENCE, 0.35))
             if (size < 2) add(DecisionCriterion("decision_confidence", "결정 후 확신과 되돌릴 수 있는 정도", 0.5, DecisionSourceType.AI_INFERENCE, 0.3))
         }
         val readyState = state.copy(
@@ -281,13 +344,14 @@ class DecisionConversationService(
             options = options,
             criteria = criteria,
             knownFacts = facts,
-            aiInferences = if (state.criteria.size < 2) (state.aiInferences + "질문 상한에 도달해 일반적인 실행 가능성과 기대 효과 기준을 낮은 신뢰도로 보완함").distinct() else state.aiInferences,
+            aiInferences = if (state.criteria.size < 2) (state.aiInferences + "추가 질문 대신 일반적인 비교 기준을 낮은 신뢰도로 보완함. 사용자 평가로 확인이 필요함").distinct().takeLast(20) else state.aiInferences,
             progress = 100,
             readyToAnalyze = true,
             nextQuestion = "",
         )
         return LlmDecisionTurn(
-            assistantMessage = "충분한 핵심 정보가 모였어요. 질문은 여기서 마치고, 이제 두 선택지의 장단점과 현실적인 대안을 비교해볼게요.",
+            assistantMessage = "질문은 여기서 마치고, ${options.joinToString(" · ") { it.name }}의 장단점을 비교해볼게요." +
+                if (state.criteria.size < 2) " 부족한 비교 기준은 임시로 보완했으니 아래 평가에서 확인해주세요." else " 아래에서 기준별로 한 번씩 평가해주세요.",
             suggestionMode = SuggestedAnswerMode.SINGLE,
             suggestedAnswers = emptyList(),
             state = readyState,
@@ -315,7 +379,7 @@ class DecisionConversationService(
         val suggestions: List<String>,
     )
 
-    private enum class DecisionTopic { JOB, MOVING, GENERAL }
+    private enum class DecisionTopic { JOB, MOVING, FOOD, GENERAL }
 
     private companion object {
         const val MAX_QUESTIONS = 12

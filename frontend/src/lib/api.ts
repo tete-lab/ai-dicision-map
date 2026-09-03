@@ -46,6 +46,7 @@ export type DecisionTurnResponse = {
   suggestionMode: "SINGLE" | "ORDERED";
   suggestedAnswers: SuggestedAnswer[];
   state: DecisionState;
+  responseMode?: "AI" | "GUIDED" | "FALLBACK";
 };
 
 export type SuggestedAnswer = { label: string; value: string };

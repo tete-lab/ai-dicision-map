@@ -5,4 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface MessageRepository : JpaRepository<MessageEntity, Long> {
     fun findBySessionOrderByIdAsc(session: DecisionSessionEntity): List<MessageEntity>
+    fun countBySessionAndRole(session: DecisionSessionEntity, role: MessageRole): Long
 }

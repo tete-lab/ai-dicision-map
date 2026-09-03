@@ -15,6 +15,7 @@ import {
   sendDecisionMessage,
 } from "@/lib/api";
 import { scenarios } from "@/lib/scenarios";
+import { withResponsePacing } from "@/lib/responseTiming";
 import { DecisionMapGraph } from "./DecisionMapGraph";
 
 type Stage = 1 | 2 | 3 | 4;
@@ -51,10 +52,12 @@ function toConversationError(error: unknown) {
 function getSuggestionConfig(question: string, state: ApiDecisionState | null): SuggestionConfig {
   const answers = (values: string[]): SuggestedAnswer[] => values.slice(0, 3).map((value) => ({ label: value, value })).concat({ label: "기타 · 직접 입력", value: "__custom__" });
   const normalized = question.replace(/\s/g, "");
-  if (/예산|비용|가격|금액|자금/.test(normalized)) return { mode: "single", label: "예산 범위를 선택해보세요", options: answers(["1억 미만", "2억 미만", "3억 미만"]) };
+  const topic = `${state?.decisionTitle ?? ""} ${state?.options.map((option) => option.name).join(" ") ?? ""}`;
+  const food = /점심|메뉴|먹을지|짜장|짬뽕|탕수육/.test(topic);
+  if (/예산|비용|가격|금액|자금/.test(normalized)) return { mode: "single", label: "비용에 대한 생각을 골라보세요", options: answers(food ? ["가격 차이가 작아요", "저렴한 쪽이 좋아요", "맛이 더 중요해요"] : ["예산 한도가 있어요", "비용 차이가 작아요", "다른 조건이 더 중요해요"]) };
   if (/우선순위|중요한기준|가장중요|순서/.test(normalized)) {
     const collected = state?.criteria.map((item) => item.name) ?? [];
-    const defaults = /이직|회사|직장/.test(state?.decisionTitle ?? "") ? ["성장 기회", "연봉과 보상", "업무 환경과 균형"] : ["통학·통근 시간", "주거비", "공간과 생활 환경"];
+    const defaults = food ? ["맛과 맵기", "가격", "양과 포만감"] : /이직|회사|직장/.test(topic) ? ["성장 기회", "연봉과 보상", "업무 환경과 균형"] : /이사|주거|전학/.test(topic) ? ["통학·통근 시간", "주거비", "공간과 생활 환경"] : ["비용", "시간", "만족도"];
     return { mode: "priority", label: "중요한 순서대로 눌러주세요", options: answers(Array.from(new Set([...collected, ...defaults]))) };
   }
   if (/언제|기간|시기|기한/.test(normalized)) return { mode: "single", label: "생각 중인 시기를 골라보세요", options: answers(["1개월 이내", "3개월 이내", "6개월 이내"]) };
@@ -94,6 +97,8 @@ export function DecisionWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
+  const [responseMode, setResponseMode] = useState<"AI" | "GUIDED" | "FALLBACK">("GUIDED");
+  const conversationEpoch = useRef(0);
   const [suggestionMode, setSuggestionMode] = useState<"SINGLE" | "ORDERED">("SINGLE");
   const [suggestedAnswers, setSuggestedAnswers] = useState<SuggestedAnswer[]>([]);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -124,8 +129,11 @@ export function DecisionWorkspace() {
     const message = decision.trim();
     if (!message || conversationLoading) return;
     setSubmittedDecision(message); setConversationLoading(true); setConversationError(null);
+    const epoch = ++conversationEpoch.current;
     try {
-      const response = await createDecision(message);
+      const response = await withResponsePacing(() => createDecision(message));
+      if (epoch !== conversationEpoch.current) return;
+      setResponseMode(response.responseMode ?? "AI");
       setSessionId(response.sessionId); setDecisionState(response.state); setSuggestionMode(response.suggestionMode ?? "SINGLE"); setSuggestedAnswers(response.suggestedAnswers ?? []);
       setAssessmentScores((current) => ensureAssessmentScores(response.state, current));
       setChatMessages([
@@ -133,8 +141,8 @@ export function DecisionWorkspace() {
         { id: messageId("assistant"), role: "assistant", content: response.assistantMessage },
       ]);
       setDecision(""); setStage(2);
-    } catch (error) { setConversationError(toConversationError(error)); }
-    finally { setConversationLoading(false); }
+    } catch (error) { if (epoch === conversationEpoch.current) setConversationError(toConversationError(error)); }
+    finally { if (epoch === conversationEpoch.current) setConversationLoading(false); }
   }
 
   async function continueConversation(event: FormEvent<HTMLFormElement>) {
@@ -144,15 +152,19 @@ export function DecisionWorkspace() {
     const id = messageId("user");
     setChatMessages((current) => [...current.filter((item) => item.status !== "failed"), { id, role: "user", content: message, status: "sending" }]);
     setChatInput(""); setConversationLoading(true); setConversationError(null); setAnalysisError(null);
+    const epoch = ++conversationEpoch.current;
     try {
-      const response = await sendDecisionMessage(sessionId, message);
+      const response = await withResponsePacing(() => sendDecisionMessage(sessionId, message));
+      if (epoch !== conversationEpoch.current) return;
+      setResponseMode(response.responseMode ?? "AI");
       setDecisionState(response.state); setSuggestionMode(response.suggestionMode ?? "SINGLE"); setSuggestedAnswers(response.suggestedAnswers ?? []);
       setAssessmentScores((current) => ensureAssessmentScores(response.state, current));
       setChatMessages((current) => [...current.map((item) => item.id === id ? { ...item, status: "sent" as const } : item), { id: messageId("assistant"), role: "assistant", content: response.assistantMessage }]);
     } catch (error) {
+      if (epoch !== conversationEpoch.current) return;
       setChatMessages((current) => current.map((item) => item.id === id ? { ...item, status: "failed" as const } : item));
       setChatInput(message); setConversationError(toConversationError(error));
-    } finally { setConversationLoading(false); }
+    } finally { if (epoch === conversationEpoch.current) setConversationLoading(false); }
   }
 
   async function runAnalysis() {
@@ -183,6 +195,8 @@ export function DecisionWorkspace() {
   }
 
   function resetDemo() {
+    conversationEpoch.current += 1;
+    setResponseMode("GUIDED");
     setStage(1); setDecision(""); setSubmittedDecision(""); setSessionId(null); setDecisionState(null); setChatMessages([]); setChatInput(""); setConversationLoading(false); setConversationError(null); setSuggestionMode("SINGLE"); setSuggestedAnswers([]); setAnalysisLoading(false); setAnalysisError(null); setAnalysisStep(0); setAssessmentScores({}); setDecisionResult(null); setResultTab("map");
   }
 
@@ -198,7 +212,7 @@ export function DecisionWorkspace() {
         </header>
 
         {stage === 1 && <QuestionStage decision={decision} setDecision={setDecision} submittedDecision={submittedDecision} state={decisionState} loading={conversationLoading} error={conversationError} onSubmit={submitDecision} />}
-        {stage === 2 && <CollectionStage decision={submittedDecision} messages={chatMessages} state={decisionState} suggestionMode={suggestionMode} suggestedAnswers={suggestedAnswers} input={chatInput} setInput={setChatInput} loading={conversationLoading} error={analysisError ?? conversationError} onSubmit={continueConversation} scores={assessmentScores} onScoreChange={(key, value) => setAssessmentScores((current) => ({ ...current, [key]: value }))} onAnalyze={runAnalysis} />}
+        {stage === 2 && <><div className="response-mode-notice" role="status">{responseMode === "FALLBACK" ? "AI 연결이 원활하지 않아 기본 안내로 진행 중입니다. 입력은 저장되며, 맞춤 AI 분석에는 서버 API 설정 확인이 필요합니다." : responseMode === "GUIDED" ? "기본 안내로 선택지를 정리하고 있어요." : "AI가 답변 내용을 반영하고 있어요."}</div><CollectionStage decision={submittedDecision} messages={chatMessages} state={decisionState} suggestionMode={suggestionMode} suggestedAnswers={suggestedAnswers} input={chatInput} setInput={setChatInput} loading={conversationLoading} error={analysisError ?? conversationError} onSubmit={continueConversation} scores={assessmentScores} onScoreChange={(key, value) => setAssessmentScores((current) => ({ ...current, [key]: value }))} onAnalyze={runAnalysis} /></>}
         {stage === 3 && <AnalysisStage progress={analysisStep} loading={analysisLoading} onShowResult={() => decisionResult && setStage(4)} />}
         {stage === 4 && decisionResult && <ResultStage activeTab={resultTab} setActiveTab={setResultTab} result={decisionResult} />}
 
@@ -259,6 +273,8 @@ function SuggestionBadges({ question, state, mode, suggestions, setInput }: { qu
   const fallback = getSuggestionConfig(question, state);
   const config: SuggestionConfig = suggestions.length === 4 ? { mode: mode === "ORDERED" ? "priority" : "single", label: mode === "ORDERED" ? "중요한 순서대로 눌러주세요" : "지금 생각과 가까운 답을 골라보세요", options: suggestions } : fallback;
   const [order, setOrder] = useState<string[]>([]);
+  if (state && state.options.length < 2) return <div className="suggestion-box"><strong>비교할 실제 선택지를 직접 입력해주세요</strong><p>입력 예: 선택지: 짜장면 / 짬뽕<br />제품·여행지·진로 등 어떤 후보든 가능하며, 2~8개를 / 로 구분해주세요.</p></div>;
+  if (state && !state.nextQuestion.trim()) return null;
   function select(option: SuggestedAnswer) {
     if (option.value === "__custom__") { setInput(""); window.requestAnimationFrame(() => document.getElementById("collection-message")?.focus()); return; }
     const naturalValue = state?.options.find((item) => item.id === option.value)?.name ?? option.value;

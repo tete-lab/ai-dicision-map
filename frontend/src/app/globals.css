@@ -760,3 +760,13 @@ tfoot { background: #f5f6f8; }
   .insight-grid, .action-panel { grid-template-columns: 1fr; }
   .workspace-footer { align-items: flex-start; padding: 12px 0; font-size: .6875rem; }
 }
+/* Keep reduced-service status separate from the conversation and input. */
+.response-mode-notice {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #f2f0ff;
+  color: #544b80;
+  font-size: 14px;
+  line-height: 1.6;
+}
