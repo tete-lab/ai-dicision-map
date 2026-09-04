@@ -1,128 +1,206 @@
 # AI Decision Map
 
-AI와 대화하며 고민의 선택지와 판단 기준을 구조화하는 의사결정 코칭 서비스입니다. 사용자의 말에서 드러난 마음의 방향과 실제 점수를 함께 해석하고, 근거가 허용하는 범위에서 긍정적인 다음 행동을 제안합니다.
+### 망설임을 근거 있는 다음 행동으로
 
-현재 저장소에는 MVP 모노레포 스캐폴드와 Decision Session 대화 API가 구현되어 있습니다.
+고민을 대화로 풀어내고, 선택지의 장단점과 판단 근거를 시각적으로 비교하는 **응원형 의사결정 코칭 서비스**입니다. 단순히 점수를 나열하는 대신, 사용자가 중요하게 생각하는 가치와 마음의 방향을 바탕으로 **왜 이 선택이 적합한지, 무엇을 확인하고 실행하면 좋을지** 제안합니다.
+
+[서비스 바로가기](https://ai-decision.tetelab.dev) · [제출 문안](docs/submission/wanted-2026/원티드_제출문안.md) · [배포 가이드](docs/DEPLOY.md)
+
+![AI Decision Map 서비스 화면](docs/submission/wanted-2026/screenshots/01-cover.png)
+
+> **개발 현황:** 1차 MVP 구현 완료. 2차 개발로 고민 유형별 Three.js 결정 지도를 연결했습니다. 도시·섬·저울·쇼룸·생활권을 자동 추천하거나 직접 선택할 수 있습니다.
+
+## 해결하려는 문제
+
+이직, 이사, 구매처럼 정답이 하나가 아닌 결정에서는 정보가 많아도 내 우선순위와 감정을 정리하기 어렵습니다. AI Decision Map은 고민을 좁히는 질문, 선택의 이유와 부담 비교, 작은 실행 계획을 통해 다음 행동으로 나아가도록 돕는 것을 목표로 합니다.
+
+## 사용 흐름
+
+**고민 입력 → 핵심 질문과 선택지 정리 → 기준별 상대 평가 → AI 분석 → 결정 지도·대안 비교·액션 플랜**
+
+| 단계 | 제공하는 경험 |
+| --- | --- |
+| 대화 | 자유 입력과 답변 칩으로 선택지·우선순위·제약을 정리합니다. 일반 칩은 즉시 전송하고 직접 입력은 작성 후 전송합니다. |
+| 평가 | 두 선택지는 기준마다 한 번의 상대 평가로 비교합니다. 점수는 사용자 선호를 정리하는 참고값입니다. |
+| 결정 지도 | 고민에 따라 도시·섬·저울·쇼룸·생활권을 표시합니다. 대안과 기준을 선택하면 실제 분석 근거를 확인합니다. 기본은 고정 시점이며 탐색 모드에서 이동할 수 있습니다. |
+| 비교 요약 | 대안별 적합한 조건, 기대 효과, 확인할 부담을 비교합니다. 점수표와 가중치 변화 그래프는 보조 자료입니다. |
+| AI 인사이트 | 대화 근거와 가정을 구분하고 추천 이유·다른 대안·결론이 달라질 조건을 설명합니다. |
+| 액션 플랜 | 지금 할 일, 필요한 확인 자료, 단계별 완료 조건을 제안합니다. |
+
+## 1차 구현 범위
+
+- **대화 피로도 완화:** 단순 메뉴 선택은 최대 4문항, 일반 고민은 최대 12문항을 기준으로 반복 질문과 추가 입력을 제한합니다.
+- **선택지 입력:** `A와 B`, `A / B`, `A vs B` 등을 처리합니다. 모호한 경우 `선택지: 새 노트북 구매 / 현재 노트북 수리`처럼 명시할 수 있습니다.
+- **응답 UX:** 사용자 말풍선을 먼저 표시하고 처리 상태를 안내합니다. 빠른 응답은 전송 후 최소 650ms에 표시하며 느린 응답에는 추가 대기를 넣지 않습니다.
+- **맥락 기반 조언:** 점수 계산과 LLM 설명 생성을 분리하고 사용자 진술에 연결된 추천·대안·실행 단계를 제공합니다.
+- **장애 대응:** AI 호출·응답 검증 실패 시 기본 안내 상태를 표시하고 입력을 보존합니다. 맞춤 분석 실패를 정상 AI 분석처럼 표시하지 않습니다.
+- **반응형 UI:** 모바일 입력 글씨 16px 이상, 단일 둥근 포커스 테두리, 카드 내부 비교표 스크롤을 적용했습니다.
+- **저장·운영:** MySQL 세션·결과 저장, Flyway 마이그레이션, Docker Compose와 GitHub Actions 배포를 구성했습니다.
+- **제출용 푸터:** 한국 시간 2026년 10월 5일까지 제출 안내, 10월 6일부터 tetelab 저작권 문구를 표시합니다. 사용자 기기 시각을 기준으로 전환합니다.
+
+### 응원하되, 근거를 왜곡하지 않습니다
+
+사용자가 마음을 두는 선택에서 얻을 수 있는 긍정적인 변화를 설명하되, 반대 선택의 장점과 실행 부담을 숨기지 않습니다. 근거가 부족하면 단정적인 추천 대신 확인할 조건과 작게 시도할 방법을 제시합니다.
+
+- 점수는 **객관적 품질이나 성공 확률이 아니라 사용자 상대 평가**입니다.
+- 입력 충족도 100%는 사실 검증이나 높은 신뢰도를 뜻하지 않습니다.
+- 사용자 진술, 가정, AI 추론을 구분합니다. 현재 외부 검색·실시간 가격 조회는 수행하지 않습니다.
+- 가중치 변화 그래프는 **중요도를 바꿨을 때의 결과 변화**이며 미래 수익이나 성공 확률 예측이 아닙니다.
+
+상세 정책: [맥락 기반 결정 조언](docs/CONTEXTUAL_ADVICE.md)
+
+## 기술 구성
+
+| 영역 | 사용 기술 |
+| --- | --- |
+| 프런트엔드 | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
+| 결정 지도 | Three.js 0.180, 절차적 3D 모형, HTML 라벨, 2D 대체 보기 |
+| 백엔드 | Spring Boot 3, Kotlin, JDK 21, Gradle |
+| 데이터 | MySQL 8, Spring Data JPA, Flyway |
+| AI | 백엔드 LLM 연동, 결정 상태 구조화, 맥락 기반 설명과 근거 참조 검증 |
+| 운영 | Docker Compose, Nginx Proxy Manager, GitHub Actions |
+| 검증 | Vitest, ESLint, 프런트엔드 빌드, JUnit 기반 백엔드 테스트 |
 
 ```text
-ai-decision-map/
-├── frontend/          Next.js + TypeScript + Tailwind CSS
-├── backend/           Spring Boot + Kotlin + Gradle
-├── nginx/             Linux 배포용 Nginx 예시
-├── docker-compose.yml
-└── .env.example
+frontend/       화면·대화 UX·결정 지도·결과 시각화
+backend/        대화 API·결정 엔진·LLM 연동·데이터 저장
+config/         운영 환경변수 예시
+docs/           배포·분석 정책·DB 초기화·제출 자료
+nginx/          별도 Nginx 사용 시 참고 설정
+.github/        main push 자동 배포 워크플로
 ```
 
-## 요구 사항
+### 분석 처리 구조
 
-- Node.js 20.9 이상 및 npm
-- JDK 21
-- Docker 및 Docker Compose (컨테이너 실행 시)
-- 접근 가능한 MySQL 8 인스턴스
+1. 대화를 결정 상태로 구조화하고 선택지·기준·진술·가정을 저장합니다.
+2. Kotlin 결정 엔진이 가중치를 정규화하고 상대 평가 점수를 계산합니다.
+3. LLM이 대화 맥락과 계산 결과를 받아 추천 이유, 장단점, 실행 계획을 보강합니다.
+4. 근거 참조와 응답 구조를 검증한 결과를 표시합니다. 이 검사는 외부 사실 검증을 대체하지 않습니다.
 
 ## 로컬 실행
 
-### 1. MySQL 환경 변수 준비
+필요 환경: Node.js 20.9 이상, npm, JDK 21, 접근 가능한 MySQL 8. 컨테이너 실행에는 Docker와 Docker Compose가 필요합니다.
 
-MySQL 관리자 계정으로 먼저 `docs/mysql-bootstrap.sql`을 실행합니다. 이 스크립트는 `ai_decision_map` 데이터베이스와 `decision_map_app` 계정을 만듭니다. 실행 전에 반드시 비밀번호 플레이스홀더를 강한 임의 비밀번호로 바꾸세요.
+### 1. 데이터베이스와 환경변수
 
-서버 주소 `218.156.22.171:9001`은 예시 환경 파일에 구성되어 있습니다. 생성한 동일한 비밀번호만 로컬 `.env`에 입력합니다. 예시 파일에는 비밀값이 들어 있지 않습니다.
+관리자 계정으로 [DB 초기화 SQL](docs/mysql-bootstrap.sql)을 확인하고 실행합니다. **실행 전에 계정 비밀번호 플레이스홀더를 변경하세요.** 이후 스키마 변경은 Flyway가 관리합니다.
+
+프로젝트 루트에서:
 
 ```bash
 cp backend/.env.example backend/.env
-# backend/.env의 MYSQL_PASSWORD와 LLM_API_KEY를 실제 값으로 변경
+# MYSQL_URL, MYSQL_USERNAME, MYSQL_PASSWORD,
+# LLM_API_KEY 및 사용 가능한 모델 설정을 실제 환경에 맞게 수정
 set -a
 source backend/.env
 set +a
 ```
 
-MySQL 서버 방화벽에서는 애플리케이션 서버의 접속만 `9001` 포트에 허용하는 것을 권장합니다. 배포 서버 IP가 확정되면 SQL 파일 하단 안내대로 `%` 계정을 해당 IP로 제한하세요. Flyway가 이후 추가되는 테이블 마이그레이션을 관리합니다.
-
-### OpenAI API 키 준비
-
-1. [OpenAI API 키 페이지](https://platform.openai.com/api-keys)에서 프로젝트용 Secret key를 생성합니다.
-2. 전체 키는 생성 순간에만 표시되므로 즉시 안전한 곳에 보관합니다.
-3. [API 결제 설정](https://platform.openai.com/settings/organization/billing/overview)에서 결제 수단 또는 선불 크레딧을 준비합니다. ChatGPT 구독과 API 결제는 별도입니다.
-4. 생성한 키를 `backend/.env`의 `LLM_API_KEY`에 입력합니다. 프런트엔드 환경변수나 Git에는 절대 넣지 않습니다.
+`MYSQL_URL`에 `&`가 들어가면 전체 값을 따옴표로 감싸야 `source` 오류를 피할 수 있습니다. API 키와 DB 비밀번호는 Git에 올리지 않으며 LLM 키는 백엔드에만 설정합니다.
 
 ### 2. 백엔드 실행
+
+위 환경변수를 불러온 터미널에서:
 
 ```bash
 cd backend
 ./gradlew bootRun
 ```
 
-헬스 엔드포인트는 `http://localhost:8013/api/v1/health`입니다.
+헬스 체크: `http://localhost:8013/api/v1/health`
 
-대화 API는 첫 고민을 `POST /api/v1/decisions`에 `{"message":"..."}`로 보내 세션을 만들고, 이어지는 답변은 `POST /api/v1/decisions/{sessionId}/messages`로 전송합니다. 현재 상태는 `GET /api/v1/decisions/{sessionId}/state`에서 확인할 수 있습니다. OpenAI Responses API 키는 반드시 백엔드의 `LLM_API_KEY`에만 설정하세요.
+### 3. 프런트엔드 실행
 
-결정 상태가 준비되면 `POST /api/v1/decisions/{sessionId}/analyze`에 기준·선택지별 0~100 평가값을 전달합니다. 최종 점수와 가중치 정규화는 Kotlin 결정 엔진이 즉시 계산합니다. `POST /api/v1/decisions/{sessionId}/enrich`는 그 결과를 바꾸지 않고 근거형 인사이트와 액션 플랜을 보강합니다. 저장된 결과는 `GET /api/v1/decisions/{sessionId}/result`에서 조회합니다.
-
-## 응원형 결정 코칭 원칙
-
-- 이사·이직처럼 삶에 영향을 주는 결정은 실행했을 때와 유지했을 때의 장점·부담을 모두 비교합니다.
-- 사용자가 직접 표현한 기대·안도감·설렘·후회 회피에서 마음의 방향을 찾고, 점수 선두와 8점 이내일 때 그 방향을 우선 응원합니다.
-- 점수 차이가 크거나 근거 품질이 낮으면 낙관적인 단정 대신 확인 가능한 작은 실험을 권합니다.
-- 결과에는 장단점, 근거 품질, 가중치 변화 시나리오, 완료 조건이 있는 액션 플랜을 함께 표시합니다.
-
-### 3. 프론트엔드 실행
-
-별도 터미널에서 실행합니다.
+프로젝트 루트의 별도 터미널에서:
 
 ```bash
 cd frontend
 cp .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
-브라우저에서 `http://localhost:3007`을 엽니다. 프론트엔드는 `NEXT_PUBLIC_API_BASE_URL`의 API를 호출합니다.
+접속: `http://localhost:3007` · 로컬 API: `http://localhost:8013`
 
-## 테스트와 빌드
+### 테스트와 빌드
 
 ```bash
 cd frontend
 npm test
 npm run lint
 npm run build
-
 cd ../backend
 ./gradlew test build
 ```
 
-## Docker Compose 실행
+## 주요 API
 
-이 Compose 파일은 MySQL 컨테이너를 만들지 않습니다. 기존 외부 MySQL을 사용합니다.
+모든 경로의 접두사는 `/api/v1`입니다.
+
+| 메서드 | 경로 | 역할 |
+| --- | --- | --- |
+| GET | `/health` | 서비스 상태 확인 |
+| POST | `/decisions` | 첫 고민으로 세션 생성 |
+| POST | `/decisions/{sessionId}/messages` | 후속 답변 전송 |
+| GET | `/decisions/{sessionId}/state` | 결정 상태 조회 |
+| POST | `/decisions/{sessionId}/analyze` | 상대 평가와 가중치 분석 |
+| POST | `/decisions/{sessionId}/enrich` | 맥락 기반 AI 설명 보강 |
+| GET | `/decisions/{sessionId}/result` | 저장된 결과 조회 |
+
+## 배포
+
+운영은 외부 MySQL과 `config/app.env`, `docker-compose.prd.yml`을 사용합니다. 프런트엔드 포트는 **3007**, 백엔드는 **8013**입니다.
 
 ```bash
-cp .env.example .env
-# .env의 MySQL 주소·비밀번호와 LLM_API_KEY를 실제 값으로 변경
-docker compose config
-docker compose up --build -d
-curl http://localhost:8013/api/v1/health
+docker compose --env-file config/app.env -f docker-compose.prd.yml config --quiet
+docker compose --env-file config/app.env -f docker-compose.prd.yml up --build -d
 ```
 
-실행 포트는 프론트엔드 `3007`, 백엔드 `8013`입니다. 데이터베이스 포트는 Compose에서 외부로 노출하지 않습니다.
+Nginx Proxy Manager가 외부 HTTPS를 종료하고 `/`는 프런트엔드, `/api/`는 백엔드로 HTTP 전달합니다. 동일 도메인 구성에서는 `NEXT_PUBLIC_API_BASE_URL`을 비워 두고 이 값 변경 시 프런트엔드를 다시 빌드합니다.
 
-## Linux + Nginx 배포
+`main` push 또는 Actions 수동 실행으로 배포합니다. 필요한 Secrets는 `BACKEND_HOST`, `SERVER_USER`, `SSH_PRIVATE_KEY`입니다. 서버의 실제 `config/app.env`는 별도로 준비하며 배포 소스에 포함하지 않습니다.
 
-1. 서버에 저장소를 배치하고 `.env.example`을 `.env`로 복사합니다.
-2. MySQL URL, 사용자명, 비밀번호와 허용할 서비스 도메인을 설정합니다.
-3. 같은 도메인에서 `/api`를 프록시할 경우 `NEXT_PUBLIC_API_BASE_URL`을 빈 값으로 설정합니다. 이 값은 브라우저 번들에 포함되므로 프론트엔드 이미지를 다시 빌드해야 변경됩니다.
-4. 운영 서버에서는 `config/app.env`와 `docker-compose.prd.yml`을 사용해 Compose 프로젝트를 시작합니다.
-5. [nginx/decision-map.conf](nginx/decision-map.conf)의 도메인과 인증서 경로를 서버 환경에 맞게 바꿔 Nginx에 적용합니다.
-6. `https://your-domain.example/api/v1/health`와 첫 화면을 확인합니다.
+최초 설정, 프록시·방화벽 주의사항, 로그 확인: [배포 가이드](docs/DEPLOY.md)
 
-운영 서버에서는 `.env`를 커밋하지 말고 권한을 제한하세요. LLM API 키는 백엔드 환경 변수에만 두며 `NEXT_PUBLIC_` 접두사를 사용하지 않습니다.
+## 현재 한계와 2차 개발 방향
 
-서버 최초 준비, Nginx 적용, GitHub Secrets와 자동 배포 사용법은 [docs/DEPLOY.md](docs/DEPLOY.md)를 참고하세요. `.github/workflows/deploy.yml`은 `main` push 시 배포하며, Actions 화면에서 수동 실행도 가능합니다. 서버의 `config/app.env`를 먼저 준비해야 합니다.
+| 구분 | 현황 / 다음 작업 |
+| --- | --- |
+| 결정 지도 | 다섯 유형의 Three.js 장면과 실제 결과 연결 구현. 정교한 모델링·재질 및 실기기 성능 최적화는 후속 과제입니다. |
+| 근거 품질 | 대화 근거 참조 검증을 적용. 외부 출처 검증과 다양한 고민에 대한 정확도 평가는 후속 과제입니다. |
+| 대화 이해 | 긴 문장과 모호한 후보 표현에서 추출 오류 가능. 질문 반복·선택지 정정 회귀 사례를 확장할 예정입니다. |
+| 저장·공유 | 서버 세션·결과 저장은 구현. 사용자용 결과 저장·링크 공유·PDF 버튼 연결은 미완료입니다. |
+| 사용성 | 모바일 너비 검사 수행. 실제 iPhone Safari와 저사양 기기의 입력·시각화 검증이 추가로 필요합니다. |
+| 효과 검증 | 실제 사용자 의사결정 도움 정도와 응답 지연을 측정할 예정입니다. 검증되지 않은 효과·정확도 수치를 주장하지 않습니다. |
 
-## 대화 피로도와 장애 시 동작
+2차 시각화의 우선순위는 **멋진 3D 자체가 아니라 대안의 차이·판단 근거·다음 행동을 더 쉽게 이해하는 경험**입니다. 점수나 사용자 선호를 시각적 성공 확률처럼 표현하지 않고 모바일 가독성과 접근성을 함께 고려합니다.
 
-- 빠른 대화 응답은 전송 시점부터 최소 650ms 후 표시합니다. 느린 응답에는 추가 대기를 넣지 않습니다.
-- 명시적인 후보는 `A와 B`, `A / B`, `A vs B`, `A를 먹을지 B를 먹을지` 등에서 추출합니다. 복잡하거나 모호한 입력은 `선택지: 후보 A / 후보 B` 형식으로 직접 확인할 수 있습니다(2~8개).
-- 단순 메뉴 선택은 최대 4문항, 일반 고민은 최대 12문항으로 제한합니다. 실제 저장된 답변 수도 검사해 기존 세션의 질문 이력이 누락되어도 무한 반복하지 않습니다.
-- AI 호출에 실패하면 화면에 기본 안내 모드임을 표시하고, 입력한 선택지·기준을 보존합니다. 질문 후보가 소진되면 분석 준비로 전환하며, 실제 후보가 없을 때는 임의로 생성하지 않고 직접 입력을 요청합니다.
-- 보완한 기준은 AI 추론으로 구분합니다. 기본 안내는 맞춤 AI 분석을 대체하지 않으므로 서버의 유효한 `LLM_API_KEY`와 사용 가능한 모델 설정이 필요합니다.
+## 고민 유형별 3D 지도
 
-마지막 업데이트: 2026-09-03 14:14:29 KST (한국 시간)
+| 유형 | 장면 | 의미 |
+| --- | --- | --- |
+| 커리어 | 도로와 빌딩 | 선택지는 구역, 판단 기준은 빌딩 |
+| 여행 | 섬과 연결 항로 | 선택지는 섬, 판단 기준은 이정표 |
+| 기타 | 무게추가 내려오는 저울 | 중요도 × 상대 평가를 공통 기준별로 반영 |
+| 구매·소비 | 제품 모형과 진열대 | 대안의 사용 가치와 확인할 부담 비교 |
+| 이사·주거 | 집과 생활 경로 | 대안의 생활 조건 비교 |
+
+- 로컬 시연: [http://localhost:3007/map-preview](http://localhost:3007/map-preview). 가상 데이터만 사용하며 DB/LLM을 호출하지 않습니다.
+- 분석 결과의 결정 지도에도 같은 컴포넌트를 사용합니다. 자동 유형 추천은 제목·선택지의 키워드 기반이며 직접 변경할 수 있습니다.
+- 세 개 이상 대안은 두 개씩 선택해 비교합니다. 선택하지 않은 대안을 삭제하거나 점수를 바꾸지 않습니다.
+- 저울의 미확인 평가는 무게에서 제외하고 별도 안내합니다. 추천 방향에 대한 임의 가산점은 없습니다.
+- WebGL 실패 시 2D 비교로 전환합니다. 동작 줄이기, 저울 재생/건너뛰기, 시점 초기화를 제공합니다.
+- 화면 밖·백그라운드에서는 애니메이션을 멈추고, 짧은 효과 종료 후에는 변경 시에만 렌더링합니다.
+- 현재 모델은 컨셉을 경량 기하 도형으로 구현한 버전입니다. 컨셉 이미지와 동일한 실사 도시 모델이나 실제 지리 정보는 아닙니다.
+
+구조와 검증 방법: [3D 결정 지도 개발 가이드](docs/DECISION_WORLD.md)
+
+## 제출 자료
+
+- [원티드 제출 문안](docs/submission/wanted-2026/원티드_제출문안.md)
+- [스크린샷 설명 및 검증 기록](docs/submission/wanted-2026/검증_및_등록가이드.md)
+- [제출 자료 ZIP](docs/submission/wanted-2026.zip)
+
+김태건 · tetelab · 원티드 AI Championship 2026 제출 프로젝트
+
+마지막 정리: 2026-09-04 (한국 시간)
