@@ -22,9 +22,25 @@ export function detectSceneTheme(result: Pick<SceneResult, "title" | "options">)
   const matches = (text: string) => (Object.keys(patterns) as Array<keyof typeof patterns>).filter((key) => patterns[key].test(text));
   const title = matches(result.title);
   if (title.length === 1) return title[0];
-  if (title.length > 1) return "balance"; // Mixed intent: let the user choose instead of guessing.
+  if (title.length > 1) return "balance"; // Mixed intent has one neutral, fixed presentation.
   const options = matches(result.options.map((o) => o.name).join(" "));
   return options.length === 1 ? options[0] : "balance";
+}
+
+/** One shared mapping for the 3D object, label and accessible comparison. Missing is never zero. */
+export function sceneMetric(result: SceneResult, optionId: string, criterionId: string) {
+  const assessment = result.assessments.find((a) => a.optionId === optionId && a.criterionId === criterionId);
+  const criterion = result.criteria.find((c) => c.id === criterionId);
+  const score = assessment && Number.isFinite(assessment.score) && assessment.score >= 0 && assessment.score <= 100 ? assessment.score : null;
+  const weight = criterion && Number.isFinite(criterion.normalizedWeight) && criterion.normalizedWeight >= 0 ? criterion.normalizedWeight : null;
+  return {
+    score, weight,
+    scoreLabel: score === null ? "미확인" : `${Number(score.toFixed(1))}점`,
+    weightLabel: weight === null ? "중요도 미확인" : `중요도 ${Number((weight * 100).toFixed(1))}%`,
+    contribution: score !== null && weight !== null ? score / 100 * weight : null,
+    // A zero score has no tower above its separate foundation; unknown uses an outlined placeholder.
+    height: score === null ? null : score / 100 * 3.8,
+  };
 }
 
 export type WeightKind = "coin" | "clock" | "heart" | "home" | "spark";

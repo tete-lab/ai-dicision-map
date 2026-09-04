@@ -819,14 +819,11 @@ tfoot { background: #f5f6f8; }
 .decision-world { --world-purple: #7255c6; --world-mint: #268c7e; border: 1px solid #e6e1ef; border-radius: 22px; overflow: hidden; background: #fff; min-width: 0; }
 .world-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding: 26px 26px 16px; }
 .world-heading > div { min-width: 0; }
+.world-theme-badge { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #ded5e9; border-radius: 24px; padding: 11px 15px; color: #78638e; background: #faf7fd; font-size: 14px; }
 .world-heading h3 { font-size: 24px; margin: 8px 0; color: #34294e; }
 .world-heading p { margin: 0; color: #736b82; font-size: 15px; line-height: 1.7; max-width: 620px; }
 .world-eyebrow { color: #8065c5; font-size: 11px; letter-spacing: .1em; font-weight: 800; }
-.world-theme-label { display: grid; gap: 6px; flex-shrink: 0; color: #71667e; font-size: 12px; }
-.world-theme-label select, .world-pair select { font-size: 16px; padding: 10px 12px; border: 1px solid #ddd5ec; border-radius: 10px; background: white; color: #433254; max-width: 100%; min-width: 0; }
-.world-themes { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 26px 20px; }
-.world-themes button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 13px; border: 1px solid #e6e0f0; background: #faf9fc; border-radius: 11px; color: #6b627b; font-size: 14px; cursor: pointer; }
-.world-themes button[aria-pressed="true"] { color: #6242bd; background: #f0eafa; border-color: #b8a5e5; }
+.world-pair select { font-size: 16px; padding: 10px 12px; border: 1px solid #ddd5ec; border-radius: 10px; background: white; color: #433254; max-width: 100%; min-width: 0; }
 .world-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 12px 26px; background: #faf9fd; border-top: 1px solid #eee9f5; font-size: 13px; color: #70667f; }
 .world-controls label { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; }
 .world-controls input { accent-color: #7755c8; width: 16px; height: 16px; }
@@ -836,14 +833,25 @@ tfoot { background: #f5f6f8; }
 .world-pair > span { flex-basis: 100%; }
 .world-pair label { display: grid; gap: 5px; flex: 1 1 180px; min-width: 0; }
 .world-stage-wrap { position: relative; }
-.world-stage { position: relative; height: 510px; overflow: hidden; background: #f5f3fa; isolation: isolate; }
+.world-stage-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-color: #c5b5da #f5f1fa; scrollbar-width: thin; }
+.world-stage-scroll[hidden] { display: none; }
+.world-stage { position: relative; height: 660px; min-width: 960px; overflow: hidden; background: #f5f3fa; isolation: isolate; }
 .world-stage[hidden] { display: none; }
 .world-stage canvas { display: block; width: 100%; height: 100%; }
 .world-stage.is-exploring { cursor: grab; }
 .world-stage.is-exploring:active { cursor: grabbing; }
 .world-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+.world-leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.world-leaders line { stroke-width: 1; stroke-opacity: .6; }
 .world-marker { position: absolute; transform: translate(-50%, -100%); border: 1px solid #d4c8e6; border-radius: 9px; background: rgba(255,255,255,.97); color: #58456e; box-shadow: 0 5px 18px #41305c14; font: inherit; font-size: 13px; padding: 7px 10px; max-width: 155px; line-height: 1.4; overflow-wrap: anywhere; pointer-events: auto; cursor: pointer; }
 .world-marker[hidden] { display: none; }
+.world-marker[data-criterion] { display: grid; grid-template-columns: 1fr auto; gap: 5px 6px; width: 174px; max-width: 18%; text-align: left; padding: 10px 12px; min-height: 70px; background: #fffdfaf0; backdrop-filter: blur(8px); }
+.world-marker[data-criterion] span { font-size: 13px; font-weight: 650; line-height: 1.5; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.world-marker[data-criterion] b { font-size: 17px; font-variant-numeric: tabular-nums; color: #7858b6; white-space: nowrap; }
+.world-marker[data-criterion] small { grid-column: 1 / -1; color: #8a7d91; font-size: 11px; }
+.world-marker[data-side="1"] { border-color: #bed9d0; }
+.world-marker[data-side="1"] b { color: #3b8d7e; }
+.world-marker-option[data-side="1"] { background: #e8f5ef; color: #367467; }
 .world-marker-option { font-size: 15px; font-weight: 750; background: #ede8f9; max-width: 190px; border-color: #beaedb; }
 .world-marker[aria-pressed="true"] { box-shadow: 0 0 0 2px #9c80dd55, 0 6px 20px #49376020; border-color: #9471d5; }
 .world-marker-origin { background: #fff; border-radius: 20px; color: #766382; pointer-events: none; }
@@ -855,6 +863,18 @@ tfoot { background: #f5f6f8; }
 .world-playback button:disabled { opacity: .5; cursor: default; }
 .world-disclaimer { margin: 0; background: #faf9fd; padding: 14px 26px; color: #7a7087; font-size: 13px; line-height: 1.7; }
 .world-disclaimer span { display: block; color: #946a40; }
+.world-disclaimer .world-scroll-hint { color: #756386; margin-top: 4px; }
+.world-metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 20px 26px 0; }
+.world-metric-grid article { border: 1px solid #e8e0ee; border-radius: 14px; overflow: hidden; }
+.world-metric-grid header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; background: #faf8fc; }
+.world-metric-grid header > span { font-size: 12px; color: #977cba; }
+.world-metric-grid h4 { margin: 0; font-size: 15px; color: #5c496b; }
+.world-metric-grid small { margin-left: auto; font-size: 12px; color: #8e7f99; }
+.world-metric-grid article > div { display: grid; grid-template-columns: 1fr 1fr; }
+.world-metric-grid button { display: flex; flex-wrap: wrap; position: relative; text-align: left; gap: 8px; align-items: center; justify-content: space-between; padding: 13px 12px 17px; border: 0; border-top: 1px solid #eee8f3; border-right: 1px solid #eee8f3; background: #fff; color: #675774; cursor: pointer; overflow: hidden; }
+.world-metric-grid button span { font-size: 13px; overflow-wrap: anywhere; }.world-metric-grid button b { font-size: 19px; color: #8464bd; white-space: nowrap; }
+.world-metric-grid button i { position: absolute; height: 3px; bottom: 0; left: 0; background: #b396e1; }.world-metric-grid button[data-side="1"] i { background: #7cb9a9; }.world-metric-grid button[data-side="1"] b { color: #3b8b77; }
+.world-metric-grid button[aria-pressed="true"] { background: #f7f2fd; }
 .world-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #7b659b; background: #f5f3fa; z-index: 4; font-size: 15px; }
 .world-selection { padding: 22px 26px 26px; }
 .world-option-tabs { display: flex; gap: 10px; margin-bottom: 14px; }
@@ -884,8 +904,7 @@ tfoot { background: #f5f6f8; }
 .decision-world button:focus-visible, .decision-world select:focus-visible, .decision-world input:focus-visible { outline: 3px solid #aa8de1; outline-offset: 3px; }
 @media (max-width: 767px) {
   .world-heading { flex-direction: column; gap: 14px; padding: 20px 16px 14px; }
-  .world-heading h3 { font-size: 22px; }.world-theme-label { width: 100%; }
-  .world-themes { padding: 0 16px 16px; gap: 6px; }.world-themes button { flex: 1 1 135px; justify-content: center; min-height: 44px; }
+  .world-heading h3 { font-size: 22px; }
   .world-controls { padding: 10px 16px; gap: 8px 14px; }.world-controls label { min-height: 40px; }
   .world-controls button { min-height: 44px; }
   .world-stage { height: 410px; }.world-marker { max-width: 125px; font-size: 12px; padding: 8px; min-height: 36px; }
@@ -901,3 +920,8 @@ tfoot { background: #f5f6f8; }
 .world-preview > header a { color: #7b5bb1; font-size: 14px; }.world-preview > header label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 14px; color: #705c89; margin-top: 20px; }
 .world-preview > header select { padding: 10px 14px; border: 1px solid #d9cee8; border-radius: 10px; font-size: 16px; background: white; }
 @media (max-width: 767px) { .world-preview { padding: 20px 12px 40px; } }
+@media (max-width: 767px) {
+  .world-metric-grid { grid-template-columns: 1fr; padding: 16px 16px 0; }
+  .world-marker[data-criterion] { min-height: 70px; padding: 10px 12px; }
+  .world-theme-badge { font-size: 13px; }
+}

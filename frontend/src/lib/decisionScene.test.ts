@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balanceContributions, detectSceneTheme, selectComparisonPair, weightKind } from "./decisionScene";
+import { balanceContributions, detectSceneTheme, sceneMetric, selectComparisonPair, weightKind } from "./decisionScene";
 import { sceneExample } from "./sceneExamples";
 
 describe("decision scene classification", () => {
@@ -60,6 +60,39 @@ describe("honest balance", () => {
     const before = balanceContributions(result, "option-0", "option-1").angle;
     result.criteria.forEach((c) => c.normalizedWeight *= 100);
     expect(balanceContributions(result, "option-0", "option-1").angle).toBeCloseTo(before);
+  });
+});
+
+describe("shared score-to-object mapping", () => {
+  it("maps score linearly to tower height and weight times score to volume", () => {
+    const result = sceneExample("career");
+    const a = result.assessments[0];
+    a.score = 40;
+    expect(sceneMetric(result, a.optionId, a.criterionId)).toMatchObject({ scoreLabel: "40점", weightLabel: "중요도 25%", height: 1.52, contribution: .1 });
+    a.score = 80;
+    expect(sceneMetric(result, a.optionId, a.criterionId).height).toBeCloseTo(3.04);
+  });
+  it("preserves zero, excludes invalid numbers and never invents a missing assessment", () => {
+    const result = sceneExample("career");
+    const a = result.assessments[0];
+    a.score = 0;
+    expect(sceneMetric(result, a.optionId, a.criterionId)).toMatchObject({ scoreLabel: "0점", height: 0, contribution: 0 });
+    for (const score of [NaN, Infinity, -1, 101]) {
+      a.score = score;
+      expect(sceneMetric(result, a.optionId, a.criterionId)).toMatchObject({ scoreLabel: "미확인", height: null, contribution: null });
+    }
+    expect(sceneMetric(result, "absent", a.criterionId).scoreLabel).toBe("미확인");
+  });
+  it("does not alter scores to match the encouraged option", () => {
+    const result = sceneExample("career"), a = result.assessments[0];
+    const before = sceneMetric(result, a.optionId, a.criterionId);
+    result.guidance.encouragedOptionId = result.options[1].id;
+    expect(sceneMetric(result, a.optionId, a.criterionId)).toEqual(before);
+  });
+  it("does not display invalid importance as a real weight", () => {
+    const result = sceneExample("career"), a = result.assessments[0];
+    result.criteria[0].normalizedWeight = NaN;
+    expect(sceneMetric(result, a.optionId, a.criterionId)).toMatchObject({ weight: null, contribution: null, weightLabel: "중요도 미확인" });
   });
 });
 

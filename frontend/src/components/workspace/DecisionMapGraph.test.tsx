@@ -5,6 +5,24 @@ import { ResultStage } from "./DecisionWorkspace";
 import { sceneExample } from "@/lib/sceneExamples";
 
 describe("decision world integration", () => {
+  it("fixes the theme from the question and offers no theme switch", () => {
+    const html = renderToStaticMarkup(<DecisionMapGraph result={sceneExample("career")} />);
+    expect(html).toContain("질문에 맞춘 지도");
+    expect(html).not.toContain("화면 유형");
+    expect(html).not.toContain("world-themes");
+    expect(html).not.toContain("<select");
+  });
+  it("renders every criterion and both scores at once, including missing data", () => {
+    const result = sceneExample("career");
+    result.assessments.shift();
+    const html = renderToStaticMarkup(<DecisionMapGraph result={result} />);
+    expect(html).toContain("모든 고민 포인트의 점수 비교");
+    for (const criterion of result.criteria) expect(html).toContain(criterion.name);
+    expect(html).toContain("미확인");
+    expect(html).toContain("80점");
+    expect(html).toContain("중요도 25%");
+    expect(html).not.toContain("크기는 점수나");
+  });
   it("renders actual result criteria and evidence without requiring WebGL on the server", () => {
     const result = sceneExample("career");
     result.assessments[0].reason = "직접 입력한 고유한 평가 이유";
