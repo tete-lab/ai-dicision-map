@@ -1,103 +1,72 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Building2, Compass, Home, Scale, ShoppingBag, RotateCcw, Minus, Plus } from "lucide-react";
-import { balanceContributions, detectSceneTheme, sceneMetric, sceneThemes, selectComparisonPair, type SceneResult } from "@/lib/decisionScene";
-import type { DecisionSceneController } from "./scene/createDecisionScene";
+import Image from "next/image";
+import { useMemo, useState } from "react";
+import { Building2, Compass, Home, RotateCcw, Scale, ShoppingBag, Sparkles } from "lucide-react";
+import { balanceContributions, detectSceneTheme, sceneMetric, sceneThemes, selectComparisonPair, type SceneResult, type SceneTheme } from "@/lib/decisionScene";
 
 const icons = { career: Building2, travel: Compass, balance: Scale, purchase: ShoppingBag, housing: Home };
 const sources = { USER_FACT: "사용자 진술", USER_ASSUMPTION: "사용자 가정", AI_INFERENCE: "AI 추론" };
-const reducedQuery = "(prefers-reduced-motion: reduce)";
-function subscribeMotion(callback: () => void) {
-  const query = window.matchMedia(reducedQuery);
-  query.addEventListener("change", callback);
-  return () => query.removeEventListener("change", callback);
-}
+const art: Partial<Record<SceneTheme, { src: string; alt: string }>> = {
+  career: { src: "/decision-atlas/career.webp", alt: "서로 다른 업무 환경을 나타낸 두 개의 도시 모형" },
+  travel: { src: "/decision-atlas/travel.webp", alt: "서로 다른 여행 경험을 나타낸 두 개의 섬 모형" },
+  housing: { src: "/decision-atlas/housing.webp", alt: "서로 다른 생활 조건을 나타낸 두 개의 주거 지역 모형" },
+  purchase: { src: "/decision-atlas/purchase.webp", alt: "현재 것을 유지하는 경우와 새 제품을 선택하는 경우의 생활 모형" },
+};
 
 export function DecisionMapGraph({ result }: { result: SceneResult }) {
-  return <DecisionWorld key={result.sessionId} result={result} />;
+  return <DecisionAtlas key={result.sessionId} result={result} />;
 }
 
-function DecisionWorld({ result }: { result: SceneResult }) {
+function DecisionAtlas({ result }: { result: SceneResult }) {
   const theme = detectSceneTheme(result);
   const ThemeIcon = icons[theme];
   const [pairIds, setPairIds] = useState<string[]>([]);
   const pair = useMemo(() => selectComparisonPair(result, pairIds), [result, pairIds]);
-  const [selection, setSelection] = useState({ optionId: result.options[0]?.id ?? "", criterionId: result.criteria[0]?.id ?? "" });
-  const [simple, setSimple] = useState(false);
-  const [explore, setExplore] = useState(false);
-  const [motionOff, setMotionOff] = useState(false);
-  const reduced = useSyncExternalStore(subscribeMotion, () => window.matchMedia(reducedQuery).matches, () => true);
-  const motion = !reduced && !motionOff;
-  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
-  const host = useRef<HTMLDivElement>(null);
-  const labels = useRef<HTMLDivElement>(null);
-  const controller = useRef<DecisionSceneController | null>(null);
+  const [criterionId, setCriterionId] = useState(result.criteria[0]?.id ?? "");
+  const [replay, setReplay] = useState(0);
+  const selected = result.criteria.find((criterion) => criterion.id === criterionId) ?? result.criteria[0];
   const balance = useMemo(() => balanceContributions(result, pair[0]?.id ?? "", pair[1]?.id ?? ""), [result, pair]);
-  const selectedOption = pair.find((o) => o.id === selection.optionId) ?? pair[0];
-  const selectedCriterion = result.criteria.find((c) => c.id === selection.criterionId) ?? result.criteria[0];
-  const profile = result.optionProfiles.find((p) => p.optionId === selectedOption?.id);
-  const assessment = result.assessments.find((a) => a.optionId === selectedOption?.id && a.criterionId === selectedCriterion?.id);
+  const profiles = pair.map((option) => result.optionProfiles.find((profile) => profile.optionId === option?.id));
+  const assessments = pair.map((option) => result.assessments.find((item) => item.optionId === option?.id && item.criterionId === selected?.id));
 
-  useEffect(() => {
-    if (simple || !host.current || !labels.current || pair.length < 2) return;
-    let disposed = false;
-    let instance: DecisionSceneController | null = null;
-    const mount = host.current, overlay = labels.current;
-    // This chunk is requested only when the result map is actually mounted.
-    import("./scene/createDecisionScene").then(({ createDecisionScene }) => {
-      if (disposed) return;
-      try {
-        instance = createDecisionScene({ host: mount, labels: overlay, result, theme, pair, onSelect: setSelection, onFailure: () => setStatus("failed") });
-        controller.current = instance;
-        setStatus("ready");
-      } catch {
-        setStatus("failed");
-      }
-    }).catch(() => { if (!disposed) setStatus("failed"); });
-    return () => { disposed = true; instance?.dispose(); controller.current = null; };
-  }, [result, theme, pair, simple]);
+  if (pair.length < 2) return <section className="decision-atlas atlas-empty"><Compass size={28} /><h3>비교할 선택지가 더 필요해요</h3><p>두 개 이상의 선택지가 확인되면 결정 지도를 그려드릴게요.</p></section>;
 
-  useEffect(() => { controller.current?.setMotion(motion); }, [motion, status, theme, pair, simple]);
-  useEffect(() => { controller.current?.setExplore(explore); }, [explore, status, theme, pair, simple]);
-  useEffect(() => {
-    controller.current?.select(selectedOption?.id ?? "", selectedCriterion?.id ?? "");
-  }, [selectedOption?.id, selectedCriterion?.id, status, theme, pair, simple]);
-
-  const summaryMode = simple || status === "failed" || pair.length < 2;
-  return <section className="decision-world" aria-label="고민 유형별 결정 지도">
-    <header className="world-heading">
-      <div><span className="world-eyebrow">DECISION WORLD · 질문에 맞춘 지도</span><h3>{sceneThemes[theme].title}</h3><p>{sceneThemes[theme].description}</p></div>
-      <span className="world-theme-badge"><ThemeIcon size={18} aria-hidden="true" />{sceneThemes[theme].label}</span>
-    </header>
-    {result.options.length > 2 && <div className="world-pair"><span>전체 {result.options.length}개 중 두 대안을 나란히 비교</span>{pair.map((option, index) => <label key={index}>{index === 0 ? "왼쪽 대안" : "오른쪽 대안"}<select value={option.id} onChange={(e) => { const next = pair.map((o) => o.id); next[index] = e.target.value; setPairIds(next); setStatus("loading"); }}>{result.options.map((o) => <option key={o.id} value={o.id} disabled={o.id === pair[1 - index]?.id}>{o.name}</option>)}</select></label>)}</div>}
-    <div className="world-controls">
-      <label><input type="checkbox" checked={simple} onChange={(e) => { setSimple(e.target.checked); setStatus("loading"); }} />간단히 보기 (2D)</label>
-      {!summaryMode && <><label><input type="checkbox" checked={motionOff || reduced} disabled={reduced} onChange={(e) => setMotionOff(e.target.checked)} />{reduced ? "기기 설정: 동작 줄임" : "동작 줄이기"}</label><button type="button" className="world-explore" aria-pressed={explore} onClick={() => setExplore(!explore)}>{explore ? "지도 탐색 종료" : "지도 탐색"}</button></>}
-    </div>
-    <div className="world-stage-wrap">
-      <div className="world-stage-scroll" hidden={summaryMode} tabIndex={0} role="region" aria-label="결정 지도. 좁은 화면에서는 좌우로 밀어 모든 고민 포인트를 볼 수 있습니다.">
-      <div ref={host} style={{ height: Math.max(660, Math.ceil(result.criteria.length / 2) * 142 + 250) }} className={`world-stage theme-${theme} ${explore ? "is-exploring" : ""}`} role="group" aria-label={`${sceneThemes[theme].title} 3D 장면. 아래 대안과 기준 버튼으로도 탐색할 수 있습니다.`}>
-        <div ref={labels} className="world-labels" />
-        {status === "loading" && <div className="world-loading" role="status">결정 지도를 준비하고 있어요…</div>}
-      </div>
-      </div>
-      {summaryMode && <div className="world-flat"><p role="status">{status === "failed" ? "이 환경에서는 3D를 표시할 수 없어 간단한 비교로 전환했어요." : "효과 없이 같은 대안과 근거를 비교합니다."}</p><div>{pair.map((o, i) => <button key={o.id} type="button" aria-pressed={o.id === selectedOption?.id} onClick={() => setSelection({ ...selection, optionId: o.id })}><span>{i === 0 ? "A" : "B"}</span><strong>{o.name}</strong><small>{result.optionProfiles.find((p) => p.optionId === o.id)?.bestWhen || "적합한 조건을 아래에서 확인하세요."}</small></button>)}</div></div>}
-      {!summaryMode && status === "ready" && <div className="world-camera"><button type="button" aria-label="지도 축소" onClick={() => controller.current?.zoom(0.85)}><Minus size={18} /></button><button type="button" aria-label="지도 확대" onClick={() => controller.current?.zoom(1.18)}><Plus size={18} /></button><button type="button" aria-label="지도 시점 초기화" onClick={() => controller.current?.reset()}><RotateCcw size={17} /></button></div>}
-      {!summaryMode && theme === "balance" && <div className="world-playback"><button type="button" disabled={!motion || !balance.hasData || status !== "ready"} onClick={() => controller.current?.replay()}>무게추 다시 보기</button><button type="button" onClick={() => controller.current?.finish()}>최종 균형 보기</button></div>}
-    </div>
-    <p className="world-disclaimer">{theme === "balance" ? (!balance.hasData ? "비교 가능한 공통 평가가 없어 저울을 기울이지 않았어요." : `공통 기준 ${balance.contributions.length}개 반영 · 무게추 부피 = 중요도 × 평가 점수. 기울기는 상대 평가의 가중 합입니다.`) : "고민 포인트의 건물·표식 높이 = 평가 점수 (0~100). 장식 건물과 지형은 점수와 무관합니다."} 점수는 해당 기준에서의 유리함을 나타내며 성공 확률이나 검증된 사실이 아닙니다.{theme === "balance" && balance.missing.length > 0 && <span> 미반영 기준: {balance.missing.join(", ")} — 양쪽 평가와 중요도를 확인하세요.</span>}<span className="world-scroll-hint">모든 고민 포인트를 함께 표시합니다. 좁은 화면은 지도를 좌우로 밀어보세요.</span></p>
-    <div className="world-metric-grid" aria-label="모든 고민 포인트의 점수 비교">{result.criteria.map((criterion, index) => <article key={criterion.id}><header><span>{String(index + 1).padStart(2, "0")}</span><h4>{criterion.name}</h4><small>{sceneMetric(result, pair[0]?.id ?? "", criterion.id).weightLabel}</small></header><div>{pair.map((option, side) => { const metric = sceneMetric(result, option.id, criterion.id); return <button key={option.id} type="button" data-side={side} aria-pressed={selectedOption?.id === option.id && selectedCriterion?.id === criterion.id} onClick={() => setSelection({ optionId: option.id, criterionId: criterion.id })}><span>{option.name}</span><b>{metric.scoreLabel}</b><i aria-hidden="true" style={{ width: `${metric.score ?? 0}%` }} /></button>; })}</div></article>)}</div>
-    <div className="world-selection">
-      <div className="world-option-tabs" aria-label="근거를 볼 대안">{pair.map((o, i) => <button key={o.id} type="button" aria-pressed={o.id === selectedOption?.id} onClick={() => setSelection({ ...selection, optionId: o.id })}><span>{i === 0 ? "A" : "B"}</span>{o.name}</button>)}</div>
-      <div className="world-criteria" aria-label="판단 기준">{result.criteria.map((c) => <button key={c.id} type="button" aria-pressed={c.id === selectedCriterion?.id} onClick={() => setSelection({ optionId: selectedOption?.id ?? "", criterionId: c.id })}>{c.name}</button>)}</div>
-      <article className="world-evidence" aria-live="polite">
-        <header><span>선택한 판단 기준</span><h4>{selectedOption?.name ?? "선택지 미확인"} · {selectedCriterion?.name ?? "기준 미확인"}</h4></header>
-        <p>{assessment?.reason || "이 기준의 구체적인 평가 이유가 아직 기록되지 않았어요. 실제 조건을 확인해 주세요."}</p>
-        <small>{assessment ? sources[assessment.sourceType] : "미확인"} · 외부 검증된 사실과는 다릅니다.</small>
-        {profile && <div className="world-pros-cons"><div><b>기대할 장점</b>{profile.pros.map((p, i) => <p key={i}>{p}</p>)}</div><div><b>확인할 부담</b>{profile.cons.map((p, i) => <p key={i}>{p}</p>)}</div></div>}
-        {!!profile?.evidenceRefs?.length && <details><summary>이 대안의 대화 근거</summary>{profile.evidenceRefs.map((e, i) => <p key={i}>{e}</p>)}</details>}
-      </article>
-    </div>
+  return <section className={`decision-atlas atlas-${theme}`} aria-label="질문 유형에 맞춘 결정 지도">
+    <header className="atlas-heading"><div><span className="atlas-eyebrow">DECISION ATLAS · 선택이 만드는 변화</span><h3>{sceneThemes[theme].title}</h3><p>{atlasDescription(theme)}</p></div><span className="atlas-theme"><ThemeIcon size={18} aria-hidden="true" />{sceneThemes[theme].label}</span></header>
+    {result.options.length > 2 && <div className="atlas-pair"><span>전체 {result.options.length}개 중 두 대안을 비교하고 있어요.</span>{pair.map((option, index) => <label key={index}>{index === 0 ? "왼쪽 대안" : "오른쪽 대안"}<select value={option.id} onChange={(event) => { const next = pair.map((item) => item.id); next[index] = event.target.value; setPairIds(next); }}>{result.options.map((item) => <option key={item.id} value={item.id} disabled={item.id === pair[1 - index]?.id}>{item.name}</option>)}</select></label>)}</div>}
+    <div className="atlas-layout"><div className="atlas-map-column">
+      <div className="atlas-map-head"><strong>{theme === "balance" ? "이유가 쌓이면 방향이 보여요" : "두 개의 길을 함께 살펴보세요"}</strong><span>고민 포인트를 누르면 양쪽 근거가 바뀝니다</span></div>
+      {theme === "balance" ? <BalanceMap pair={pair} balance={balance} selectedId={selected?.id ?? ""} replay={replay} onSelect={setCriterionId} onReplay={() => setReplay((value) => value + 1)} /> : <LandscapeMap theme={theme} pair={pair} result={result} selectedId={selected?.id ?? ""} onSelect={setCriterionId} />}
+      <div className="atlas-legend"><span><i className="fact" />입력한 평가</span><span><i className="meaning" />AI가 정리한 의미</span><span><i className="unknown" />확인할 조건</span></div>
+      <div className="atlas-direction"><span>현재 응원 방향</span><h4>{result.guidance.headline}</h4><p>{result.guidance.rationale}</p>{result.guidance.nextAction && <strong><Sparkles size={15} />먼저 해볼 일 · {result.guidance.nextAction}</strong>}</div>
+    </div><aside className="atlas-evidence" aria-live="polite"><span className="atlas-evidence-tag">근거 들여다보기</span><h4>{selected?.name ?? "확인할 조건"}</h4>
+      {pair.map((option, index) => <section key={option.id} data-side={index}><header><span>{index === 0 ? "A" : "B"}</span><strong>{option.name}</strong><b>{selected ? sceneMetric(result, option.id, selected.id).scoreLabel : "미확인"}</b></header><p>{assessments[index]?.reason || "이 기준을 판단할 구체적인 근거가 아직 없어요."}</p><small>{assessments[index] ? sources[assessments[index]!.sourceType] : "미확인"} · 외부 검증된 사실과는 다릅니다.</small></section>)}
+      <div className="atlas-tradeoff"><div><b>기대할 변화</b><p>{profiles[1]?.pros?.[0] || profiles[0]?.pros?.[0] || "선택 이후 기대하는 변화를 확인해보세요."}</p></div><div><b>확인할 부담</b><p>{profiles[1]?.cons?.[0] || profiles[0]?.cons?.[0] || "결정 전에 실제 조건을 확인해보세요."}</p></div></div>
+    </aside></div>
+    <div className="atlas-metrics" aria-label="모든 고민 포인트 비교">{result.criteria.map((criterion, index) => <article key={criterion.id} className={criterion.id === selected?.id ? "selected" : ""}><button type="button" onClick={() => setCriterionId(criterion.id)} aria-pressed={criterion.id === selected?.id}><span>{String(index + 1).padStart(2, "0")}</span><strong>{criterion.name}</strong><small>{sceneMetric(result, pair[0].id, criterion.id).weightLabel}</small></button><div>{pair.map((option, side) => { const metric = sceneMetric(result, option.id, criterion.id); return <span key={option.id} data-side={side}><i style={{ width: `${metric.score ?? 0}%` }} /><b>{option.name}</b><em>{metric.scoreLabel}</em></span>; })}</div></article>)}</div>
+    <p className="atlas-disclaimer">풍경은 선택의 맥락을, 경로와 카드의 수치는 사용자가 입력한 상대 평가를 보여줍니다. 점수는 성공 확률이나 검증된 사실이 아닙니다.</p>
   </section>;
+}
+
+function LandscapeMap({ theme, pair, result, selectedId, onSelect }: { theme: Exclude<SceneTheme, "balance">; pair: SceneResult["options"]; result: SceneResult; selectedId: string; onSelect: (id: string) => void }) {
+  const asset = art[theme] ?? art.career!;
+  return <div className="atlas-landscape"><div className="atlas-destinations">{pair.map((option, side) => <div key={option.id} data-side={side}><span>{side === 0 ? "A" : "B"}</span><strong>{option.name}</strong>{option.id === result.guidance.encouragedOptionId && <em>응원 방향</em>}</div>)}</div><div className="atlas-art"><Image src={asset.src} alt={asset.alt} fill sizes="(max-width: 767px) 100vw, 820px" quality={75} loading="eager" /></div><svg className="atlas-routes" viewBox="0 0 800 125" preserveAspectRatio="none" aria-hidden="true"><path d="M400 109 C366 67 280 98 202 7" /><path d="M400 109 C434 67 520 98 598 7" /><circle cx="400" cy="109" r="7" /></svg><span className="atlas-origin"><Sparkles size={13} />지금의 나</span><div className="atlas-points">{pair.map((option, side) => <div key={option.id} data-side={side}>{result.criteria.slice(0, 4).map((criterion, index) => <button key={criterion.id} type="button" aria-pressed={criterion.id === selectedId} onClick={() => onSelect(criterion.id)}><span>{index + 1}</span><strong>{criterion.name}</strong><b>{sceneMetric(result, option.id, criterion.id).scoreLabel}</b></button>)}</div>)}</div></div>;
+}
+
+function BalanceMap({ pair, balance, selectedId, replay, onSelect, onReplay }: { pair: SceneResult["options"]; balance: ReturnType<typeof balanceContributions>; selectedId: string; replay: number; onSelect: (id: string) => void; onReplay: () => void }) {
+  const degrees = balance.angle * 180 / Math.PI;
+  const shown = balance.contributions.slice(0, 5);
+  const arm = 205, radians = degrees * Math.PI / 180;
+  const points = [{ x: 320 - arm * Math.cos(radians), y: 118 - arm * Math.sin(radians) }, { x: 320 + arm * Math.cos(radians), y: 118 + arm * Math.sin(radians) }];
+  const weights = (side: 0 | 1) => shown.map((item, index) => { const contribution = side === 0 ? item.left : item.right; const radius = 14 + Math.sqrt(Math.max(0, contribution)) * 6; const x = [-62, -29, 4, 37, 68][index]; const y = 144 - radius - (index % 2) * 7; return <g key={`${replay}-${item.criterionId}-${side}`} className={`atlas-weight drop-${index}`} data-active={item.criterionId === selectedId} onClick={() => onSelect(item.criterionId)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(item.criterionId); }} aria-label={`${item.name}, ${pair[side].name} 기여도 ${Math.round(contribution * 100)}점`}><title>{item.name}</title><circle cx={x} cy={y} r={radius} /><text x={x} y={y + 6}>{index + 1}</text></g>; });
+  return <div className="atlas-balance"><div className="atlas-scale-labels"><strong>{pair[0].name}<small>{balance.hasData ? `${Math.round(balance.left * 100)} 가중점` : "평가 미확인"}</small></strong><strong>{pair[1].name}<small>{balance.hasData ? `${Math.round(balance.right * 100)} 가중점` : "평가 미확인"}</small></strong></div><svg viewBox="0 0 640 385" role="img" aria-label="고민 포인트가 무게추로 쌓인 결정 저울"><defs><linearGradient id="atlas-metal" x1="0" x2="1"><stop stopColor="#685c7a"/><stop offset=".22" stopColor="#eee9f3"/><stop offset=".52" stopColor="#a99db8"/><stop offset=".72" stopColor="#fff"/><stop offset="1" stopColor="#6d617c"/></linearGradient><radialGradient id="atlas-violet"><stop stopColor="#eee4fb"/><stop offset="1" stopColor="#8d70b5"/></radialGradient><radialGradient id="atlas-jade"><stop stopColor="#e3f7ef"/><stop offset="1" stopColor="#68a897"/></radialGradient></defs><ellipse cx="320" cy="357" rx="118" ry="16" className="atlas-shadow"/><path d="M276 166 Q309 245 286 326 Q320 352 354 326 Q331 245 364 166Z" fill="url(#atlas-metal)"/><ellipse cx="320" cy="334" rx="86" ry="25" fill="url(#atlas-metal)"/><g className="atlas-beam" style={{ transform: `rotate(${degrees}deg)` }}><path d="M108 110 Q320 96 532 110 L532 126 Q320 113 108 126Z" fill="url(#atlas-metal)"/><circle cx="115" cy="118" r="10" fill="url(#atlas-metal)"/><circle cx="525" cy="118" r="10" fill="url(#atlas-metal)"/></g>{([0,1] as const).map((side) => <g key={side} className={`atlas-pan ${side ? "right" : "left"}`} style={{ transform: `translate(${points[side].x}px,${points[side].y}px)` }}><path d="M0 0 L-92 139 M0 0 L92 139"/><ellipse cy="146" rx="100" ry="20"/><g>{weights(side)}</g><path d="M-100 145 Q-78 204 0 203 Q78 204 100 145 Q0 178 -100 145Z" fill="url(#atlas-metal)"/></g>)}<circle cx="320" cy="118" r="39" fill="url(#atlas-metal)"/><circle cx="320" cy="118" r="25" fill="url(#atlas-violet)"/><circle cx="320" cy="118" r="10" fill="#f3ecff"/>{balance.missing.length > 0 && <g className="atlas-unknown"><rect x="469" y="324" width="42" height="44" rx="14"/><text x="490" y="354">?</text></g>}</svg><div className="atlas-scale-actions"><span>무게추 크기 = 중요도 × 상대 평가</span><button type="button" onClick={onReplay}><RotateCcw size={15} />다시 보기</button></div><div className="atlas-weight-keys">{shown.map((item, index) => <button key={item.criterionId} type="button" aria-pressed={item.criterionId === selectedId} onClick={() => onSelect(item.criterionId)}><span>{index + 1}</span>{item.name}</button>)}{balance.missing.length > 0 && <span className="missing">? · 미확인: {balance.missing.join(", ")}</span>}</div></div>;
+}
+
+function atlasDescription(theme: SceneTheme) {
+  if (theme === "career") return "두 업무 지구를 오가며 성장, 안정, 시간과 실제 조건을 함께 비교해요.";
+  if (theme === "travel") return "각 섬에서 얻게 될 경험과 감수할 이동·비용을 하나의 항로로 비교해요.";
+  if (theme === "housing") return "두 생활권의 통근, 비용, 공간과 안전 조건을 일상의 경로로 살펴봐요.";
+  if (theme === "purchase") return "지금 것을 유지할 때와 새로 선택할 때의 사용 가치와 부담을 비교해요.";
+  return "마음을 움직인 여러 이유를 무게추로 놓고, 어느 쪽에 힘이 실리는지 살펴봐요.";
 }
