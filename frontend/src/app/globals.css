@@ -1165,3 +1165,38 @@ tfoot { background: #f5f6f8; }
   .atlas-scale-labels em { display: block; width: fit-content; margin: 4px 0 0; }
   .atlas-scale-labels strong:last-child em { margin-left: auto; }
 }
+
+/* Stage 2 is the mobile product: start with the assistant and give the chat the viewport. */
+@media (max-width: 767px) {
+  .app-shell.stage-2-shell { display: block; height: 100dvh; min-height: 0; overflow: hidden; }
+  .stage-2-shell .app-sidebar { display: none; }
+  .workspace.stage-2 { height: 100dvh; min-height: 0; padding: 0; overflow: hidden; background: #fff; }
+  .stage-2 .stepper,
+  .stage-2 > .response-mode-notice { display: none; }
+  .stage-2 .collection-layout { width: 100%; height: 100%; min-height: 0; padding: 0; flex: 1 1 auto; }
+  .stage-2 .collection-card { height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+
+  .stage-2 .collection-card > .card-header { min-height: 78px; padding: max(10px,env(safe-area-inset-top)) 18px 10px; background: linear-gradient(180deg,#fff 0%,#fcfaff 100%); }
+  .stage-2 .collection-card > .card-header .assistant-avatar { width: 44px; height: 44px; border-radius: 14px; }
+  .stage-2 .collection-card > .card-header strong { font-size: 1.08rem; }
+  .stage-2 .collection-card > .card-header small { font-size: .76rem; }
+  .stage-2 .collection-card > .card-header > span:last-child { padding: 8px 11px; font-size: .72rem; }
+  .stage-2 .collection-progress { padding: 13px 18px 12px; }
+  .stage-2 .collection-progress > div:first-child { font-size: .82rem; }
+  .stage-2 .segmented-progress { margin-top: 9px; }
+
+  .stage-2 .collection-messages { flex: 1 1 auto; min-height: 180px; max-height: none; padding: 18px; gap: 16px; background: linear-gradient(180deg,#fff 0%,#fdfbff 100%); }
+  .stage-2 .assistant-question p,
+  .stage-2 .user-message > div { font-size: .96rem; line-height: 1.65; }
+  .stage-2 .assistant-question { max-width: 92%; }
+  .stage-2 .user-message { max-width: 88%; }
+
+  .stage-2 .collection-dock { max-height: min(43dvh,380px); padding: 12px 14px max(16px,env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+  .stage-2 .collection-dock .suggestion-box { margin-bottom: 11px; }
+  .stage-2 .collection-dock .suggestion-box > strong { font-size: .86rem; }
+  .stage-2 .collection-dock .suggestion-box button { min-height: 50px; padding: 10px 11px; font-size: .86rem; line-height: 1.45; }
+  .stage-2 .collection-dock .composer { padding: 13px; border-radius: 18px; }
+  .stage-2 .collection-dock .composer textarea { min-height: 72px; max-height: 120px; font-size: 1rem; line-height: 1.55; }
+  .stage-2 .collection-dock .composer-footer button { width: 46px; height: 46px; }
+  .stage-2 .collection-dock .composer-footer > span { font-size: .7rem; }
+}

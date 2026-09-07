@@ -52,7 +52,10 @@ describe("recommendation-first results", () => {
     expect(component).toContain("focus({ preventScroll: true })");
     expect(component).toContain("editableWhileLoading");
     expect(component).toContain("collection-dock");
-    expect(css).toContain(".workspace.stage-2 { height: calc(100dvh - 60px)");
+    expect(component).toContain("stage-${stage}-shell");
+    expect(css).toContain(".app-shell.stage-2-shell { display: block; height: 100dvh");
+    expect(css).toContain(".stage-2-shell .app-sidebar { display: none; }");
+    expect(css).toContain(".stage-2 > .response-mode-notice { display: none; }");
     expect(css).toContain(".stage-2 .collection-dock .composer { position: sticky");
     const layout = readFileSync(new URL("../../app/layout.tsx", import.meta.url), "utf8");
     expect(layout).not.toMatch(/userScalable:\s*false|maximumScale:\s*1/);

@@ -224,7 +224,7 @@ export function DecisionWorkspace() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell stage-${stage}-shell`}>
       <AppSidebar apiStatus={apiStatus} onReset={resetDemo} />
       <section className={`workspace stage-${stage}`} id="workspace">
         <header className="stepper" aria-label="결정 분석 진행 단계">
