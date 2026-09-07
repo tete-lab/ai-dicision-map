@@ -50,6 +50,10 @@ describe("recommendation-first results", () => {
     expect(css).toContain(".score-details { min-width: 0; max-width: 100%; }");
     expect(component).not.toContain("scrollIntoView");
     expect(component).toContain("focus({ preventScroll: true })");
+    expect(component).toContain("editableWhileLoading");
+    expect(component).toContain("collection-dock");
+    expect(css).toContain(".workspace.stage-2 { height: calc(100dvh - 60px)");
+    expect(css).toContain(".stage-2 .collection-dock .composer { position: sticky");
     const layout = readFileSync(new URL("../../app/layout.tsx", import.meta.url), "utf8");
     expect(layout).not.toMatch(/userScalable:\s*false|maximumScale:\s*1/);
   });

@@ -1084,3 +1084,84 @@ tfoot { background: #f5f6f8; }
 @media (prefers-reduced-motion: reduce) {
   .atlas-beam, .atlas-pan, .atlas-weight { animation: none !important; transition: none !important; }
 }
+
+/* Recommendation-first decision atlas */
+.atlas-verdict { margin: 20px 24px 0; padding: 18px 20px; display: grid; grid-template-columns: auto minmax(0,1fr) minmax(220px,.62fr); align-items: start; gap: 14px 18px; border: 1px solid #cfe6dc; border-radius: 18px; background: linear-gradient(125deg,#f4fbf7 0%,#fbf9ff 74%); box-shadow: 0 12px 28px rgba(45,102,77,.07); }
+.atlas-verdict > span { min-height: 31px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; color: #fff; background: #268662; font-size: .72rem; font-weight: 850; white-space: nowrap; }
+.atlas-verdict h4 { margin: 1px 0 6px; color: #3d3545; font-size: 1.15rem; line-height: 1.45; }
+.atlas-verdict h4 strong { color: #187a57; font-size: 1.24em; }
+.atlas-verdict > div > p { margin: 0; color: #706778; font-size: .8rem; line-height: 1.6; }
+.atlas-verdict > aside { display: grid; gap: 10px; }
+.atlas-verdict > aside > div { padding: 10px 12px; border: 1px solid rgba(215,224,220,.9); border-radius: 12px; background: rgba(255,255,255,.82); }
+.atlas-verdict aside small { display: block; margin-bottom: 6px; color: #7a7180; font-size: .66rem; font-weight: 750; }
+.atlas-verdict aside p { margin: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+.atlas-verdict aside b { padding: 4px 7px; border-radius: 7px; color: #207555; background: #e8f6ef; font-size: .68rem; }
+.atlas-verdict aside strong { display: flex; align-items: flex-start; gap: 6px; color: #5c4396; font-size: .75rem; line-height: 1.5; }
+.atlas-verdict.needs-check { border-color: #e2daea; background: linear-gradient(125deg,#faf7ff,#fffdf9); }
+.atlas-verdict.needs-check > span { background: #7654ae; }
+.atlas-verdict.needs-check h4 strong { color: #6746a1; }
+
+.atlas-art { overflow: hidden; border-radius: 13px 13px 8px 8px; }
+.atlas-preference-glow { position: absolute; z-index: 1; top: 0; bottom: 0; width: 52%; pointer-events: none; opacity: 0; transition: opacity .4s ease; }
+.atlas-landscape[data-preferred-side="0"] .atlas-preference-glow { left: 0; opacity: 1; background: radial-gradient(circle at 48% 45%,rgba(117,77,193,.22),transparent 55%); box-shadow: inset 5px 0 0 rgba(113,74,183,.7); }
+.atlas-landscape[data-preferred-side="1"] .atlas-preference-glow { right: 0; opacity: 1; background: radial-gradient(circle at 52% 45%,rgba(34,151,111,.22),transparent 55%); box-shadow: inset -5px 0 0 rgba(35,135,101,.7); }
+.atlas-destinations > div.preferred strong { color: #187a57; }
+.atlas-destinations > div.preferred em { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; font-weight: 850; }
+.atlas-routes path.preferred { stroke-width: 6; opacity: 1; filter: drop-shadow(0 0 7px rgba(68,150,113,.55)); }
+.atlas-landscape[data-preferred-side="0"] .atlas-routes path:nth-child(2), .atlas-landscape[data-preferred-side="1"] .atlas-routes path:first-child { opacity: .22; stroke-width: 2; filter: none; }
+
+.atlas-criterion-table { position: relative; z-index: 5; margin: -28px 4px 2px; overflow: hidden; border: 1px solid rgba(217,207,225,.96); border-radius: 15px; background: rgba(255,255,255,.97); box-shadow: 0 9px 26px rgba(52,39,64,.1); }
+.atlas-criterion-head, .atlas-criterion-table > button { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px,.82fr) minmax(0,1fr); align-items: center; }
+.atlas-criterion-head { min-height: 42px; padding: 0 12px; color: #756a7d; background: #f8f5f9; font-size: .67rem; }
+.atlas-criterion-head strong:last-child { color: #287c69; text-align: right; }
+.atlas-criterion-head strong:first-child { color: #7254bb; }
+.atlas-criterion-head span { text-align: center; }
+.atlas-criterion-table > button { width: 100%; min-height: 49px; padding: 0 12px; border: 0; border-top: 1px solid #eee8f0; background: #fff; color: #5e5366; cursor: pointer; }
+.atlas-criterion-table > button > span { justify-self: start; padding: 6px 8px; border-radius: 8px; color: var(--atlas-purple); font-size: .75rem; font-weight: 850; }
+.atlas-criterion-table > button > span:last-child { justify-self: end; color: var(--atlas-green); }
+.atlas-criterion-table > button > span.winner { background: #e8f5ef; box-shadow: inset 0 0 0 1px #c9e8dc; }
+.atlas-criterion-table > button > strong { min-width: 0; display: grid; grid-template-columns: 19px minmax(0,1fr); align-items: center; gap: 5px; text-align: left; font-size: .75rem; }
+.atlas-criterion-table > button > strong i { width: 19px; height: 19px; display: grid; place-items: center; border-radius: 6px; color: #7556a7; background: #f0eafa; font-size: .62rem; font-style: normal; }
+.atlas-criterion-table > button > strong small { grid-column: 2; color: #908792; font-size: .61rem; font-weight: 500; }
+.atlas-criterion-table > button[aria-pressed="true"] { background: #faf7ff; box-shadow: inset 4px 0 0 #8061ba; }
+.atlas-scale-labels strong { position: relative; }
+.atlas-scale-labels strong.preferred { color: #187a57; }
+.atlas-scale-labels em { display: inline-block; margin-left: 7px; padding: 3px 6px; border-radius: 999px; color: #fff; background: #268662; font-size: .58rem; font-style: normal; vertical-align: middle; }
+
+/* A bottom-docked mobile conversation: only messages and long chip sets scroll. */
+@media (max-width: 767px) {
+  .workspace.stage-2 { height: calc(100dvh - 60px); min-height: 0; overflow: hidden; }
+  .stage-2 .stepper { flex: 0 0 66px; }
+  .stage-2 > .response-mode-notice { flex: 0 0 auto; margin: 6px 0; padding: 7px 11px; overflow: hidden; font-size: .72rem; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-2 .collection-layout { min-height: 0; padding: 0 0 max(6px,env(safe-area-inset-bottom)); display: block; overflow: hidden; }
+  .stage-2 .collected-state { display: none; }
+  .stage-2 .collection-card { width: 100%; height: 100%; min-height: 0; max-height: none; overflow: hidden; }
+  .stage-2 .collection-card > .card-header, .stage-2 .collection-progress { flex: 0 0 auto; }
+  .stage-2 .collection-messages { flex: 1 1 auto; min-height: 92px; max-height: none; scroll-padding-bottom: 20px; overscroll-behavior: contain; }
+  .stage-2 .collection-dock { position: relative; z-index: 10; flex: 0 0 auto; max-height: min(48dvh,390px); padding: 12px 12px max(12px,env(safe-area-inset-bottom)); overflow-y: auto; border-top-color: #ded8e8; background: rgba(255,255,255,.98); box-shadow: 0 -12px 28px rgba(45,35,66,.09); overscroll-behavior: contain; }
+  .stage-2 .collection-dock .suggestion-box > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .stage-2 .collection-dock .suggestion-box button { min-height: 48px; padding: 9px 10px; font-size: .82rem; }
+  .stage-2 .collection-dock .composer { position: sticky; z-index: 2; bottom: 0; background: #fff; box-shadow: inset 0 0 0 1px #d9d4e3,0 -8px 18px rgba(255,255,255,.96); }
+  .stage-2 .collection-dock .composer textarea { min-height: 52px; max-height: 96px; }
+  .stage-2 .collection-dock .composer-footer > span { max-width: calc(100% - 52px); font-size: .68rem; line-height: 1.35; }
+  .stage-2 .workspace-footer { display: none; }
+
+  .atlas-verdict { margin: 14px 12px 0; padding: 15px; grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .atlas-verdict > span { width: fit-content; }
+  .atlas-verdict h4 { font-size: 1.05rem; }
+  .atlas-verdict h4 strong { display: block; margin-top: 2px; font-size: 1.35rem; }
+  .atlas-verdict > aside { grid-template-columns: minmax(0,1fr); }
+  .atlas-layout { padding-top: 14px; }
+  .atlas-map-head strong { font-size: 1.05rem; }
+  .atlas-destinations > div { align-items: flex-start; flex-wrap: wrap; }
+  .atlas-destinations > div.preferred em { display: flex; flex-basis: 100%; width: fit-content; margin-left: 27px; }
+  .atlas-destinations > div[data-side="1"].preferred em { margin-right: 27px; margin-left: auto; }
+  .atlas-criterion-table { margin-top: -20px; }
+  .atlas-criterion-head, .atlas-criterion-table > button { grid-template-columns: minmax(65px,.75fr) minmax(110px,1fr) minmax(65px,.75fr); }
+  .atlas-criterion-head { padding: 0 8px; font-size: .6rem; }
+  .atlas-criterion-table > button { min-height: 57px; padding: 0 8px; }
+  .atlas-criterion-table > button > strong { font-size: .7rem; }
+  .atlas-criterion-table > button > span { padding: 6px; font-size: .72rem; }
+  .atlas-scale-labels em { display: block; width: fit-content; margin: 4px 0 0; }
+  .atlas-scale-labels strong:last-child em { margin-left: auto; }
+}

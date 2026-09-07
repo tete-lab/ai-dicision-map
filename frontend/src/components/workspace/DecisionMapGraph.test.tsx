@@ -16,7 +16,7 @@ describe("decision world integration", () => {
     const result = sceneExample("career");
     result.assessments.shift();
     const html = renderToStaticMarkup(<DecisionMapGraph result={result} />);
-    expect(html).toContain("모든 고민 포인트 비교");
+    expect(html).toContain("고민 포인트");
     for (const criterion of result.criteria) expect(html).toContain(criterion.name);
     expect(html).toContain("미확인");
     expect(html).toContain("80점");
@@ -25,9 +25,15 @@ describe("decision world integration", () => {
   });
   it("renders actual result criteria and evidence without requiring WebGL on the server", () => {
     const result = sceneExample("career");
+    result.guidance.encouragedOptionId = result.options[1].id;
     result.assessments[0].reason = "직접 입력한 고유한 평가 이유";
     const html = renderToStaticMarkup(<DecisionMapGraph result={result} />);
     expect(html).toContain("나의 결정 도시");
+    expect(html).toContain("추천 결론");
+    expect(html).toContain("재직하며 이직 탐색");
+    expect(html).toContain("쪽을 지지해요");
+    expect(html).toContain("이 선택을 지지해요");
+    expect(html).toContain("고민 포인트");
     expect(html).toContain("직접 입력한 고유한 평가 이유");
     expect(html).toContain("사용자 가정");
     expect(html).toContain(encodeURIComponent("/decision-atlas/career.webp"));
