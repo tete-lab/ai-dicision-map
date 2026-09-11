@@ -60,4 +60,25 @@ describe("recommendation-first results", () => {
     const layout = readFileSync(new URL("../../app/layout.tsx", import.meta.url), "utf8");
     expect(layout).not.toMatch(/userScalable:\s*false|maximumScale:\s*1/);
   });
+
+  it("offers only working PDF and friend sharing actions and prints every result section", () => {
+    const html = renderToStaticMarkup(<ResultStage result={result} activeTab="map" setActiveTab={() => {}} />);
+    expect(html).toContain("PDF로 저장하기");
+    expect(html).toContain("친구에게 공유하기");
+    expect(html).not.toContain(">결과 저장<");
+    expect(html).not.toContain(">링크 공유<");
+    expect(html).toContain('class="decision-print-report"');
+    for (const heading of ["결정 지도", "비교 요약", "AI 인사이트", "액션 플랜"]) {
+      expect(html).toContain(`<h2>${heading}</h2>`);
+    }
+    expect(html).toContain('<details class="score-details" open="">');
+    const component = readFileSync(new URL("./DecisionWorkspace.tsx", import.meta.url), "utf8");
+    expect(component).toContain('url.searchParams.set("share", result.sessionId)');
+    expect(component).toContain("getDecisionResult(sharedSessionId, controller.signal)");
+    expect(component).toContain("navigator.share(shareData)");
+    expect(component).toContain("window.print()");
+    const layout = readFileSync(new URL("../../app/layout.tsx", import.meta.url), "utf8");
+    expect(layout).toContain("openGraph:");
+    expect(layout).toContain('card: "summary_large_image"');
+  });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, CheckCircle2, Circle, CircleDot, Compass, Download, Lightbulb, Map, MessageCircleMore, RotateCcw, Save, Send, Share2, Sparkles, UserRound } from "lucide-react";
+import { ArrowRight, Bot, Check, CheckCircle2, Circle, CircleDot, Compass, Download, Lightbulb, Map, MessageCircleMore, RotateCcw, Send, Share2, Sparkles, UserRound } from "lucide-react";
 import {
   analyzeDecision,
   ApiRequestError,
@@ -12,6 +12,7 @@ import {
   type DecisionState as ApiDecisionState,
   type SuggestedAnswer,
   getHealth,
+  getDecisionResult,
   sendDecisionMessage,
 } from "@/lib/api";
 import { scenarios } from "@/lib/scenarios";
@@ -121,6 +122,25 @@ export function DecisionWorkspace() {
   }, []);
 
   useEffect(() => {
+    const sharedSessionId = new URLSearchParams(window.location.search).get("share");
+    if (!sharedSessionId) return;
+    const controller = new AbortController();
+    getDecisionResult(sharedSessionId, controller.signal)
+      .then(({ result }) => {
+        setSessionId(sharedSessionId);
+        setSubmittedDecision(result.title);
+        setDecisionResult(result);
+        setResultTab("map");
+        setStage(4);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setConversationError("공유된 결정 결과를 불러오지 못했어요. 링크를 다시 확인해주세요.");
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     if (stage !== 3 || !analysisLoading) return;
     const timer = window.setInterval(() => setAnalysisStep((current) => Math.min(current + 1, analysisItems.length - 1)), 700);
     return () => window.clearInterval(timer);
@@ -221,6 +241,7 @@ export function DecisionWorkspace() {
     sendLock.current = false;
     setResponseMode("GUIDED");
     setStage(1); setDecision(""); setSubmittedDecision(""); setSessionId(null); setDecisionState(null); setChatMessages([]); setChatInput(""); setConversationLoading(false); setConversationError(null); setSuggestionMode("SINGLE"); setSuggestedAnswers([]); setAnalysisLoading(false); setAnalysisError(null); setAnalysisStep(0); setAssessmentScores({}); setDecisionResult(null); setResultTab("map");
+    if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
   }
 
   return (
@@ -337,6 +358,45 @@ function AnalysisStage({ progress, loading, onShowResult }: { progress: number; 
 export function ResultStage({ activeTab, setActiveTab, result, retrying = false, onRetry }: { activeTab: ResultTab; setActiveTab: (tab: ResultTab) => void; result: DecisionResult; retrying?: boolean; onRetry?: () => void }) {
   const qualityLabel = { HIGH: "높음", MEDIUM: "보통", LOW: "추가 확인 필요" }[result.evidenceQuality.level];
   const ready = result.narrativeStatus === "READY";
+  const [shareStatus, setShareStatus] = useState("");
+
+  function saveAsPdf() {
+    const previousTitle = document.title;
+    document.title = `${result.title} - AI Decision Map`;
+    window.addEventListener("afterprint", () => { document.title = previousTitle; }, { once: true });
+    window.print();
+  }
+
+  async function shareWithFriend() {
+    const url = new URL(window.location.pathname, window.location.origin);
+    url.searchParams.set("share", result.sessionId);
+    const shareData = {
+      title: `${result.title} | AI Decision Map`,
+      text: `AI Decision Map에서 고민을 정리했어요. ${result.guidance.headline}`,
+      url: url.toString(),
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setShareStatus("친구에게 공유했어요.");
+      } else {
+        await navigator.clipboard.writeText(shareData.url);
+        setShareStatus("공유 링크를 복사했어요.");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setShareStatus("공유를 취소했어요.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(shareData.url);
+        setShareStatus("공유 링크를 복사했어요.");
+      } catch {
+        setShareStatus("공유하지 못했어요. 잠시 후 다시 시도해주세요.");
+      }
+    }
+  }
+
   return <div className="result-layout">
     <section className="result-dashboard">
       <div className="result-tabs" role="tablist" aria-label="결정 분석 결과">{resultTabs.map((tab) => <button role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? "active" : ""} key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
@@ -350,17 +410,31 @@ export function ResultStage({ activeTab, setActiveTab, result, retrying = false,
       {activeTab === "insight" && <InsightPanel result={result} />}
       {activeTab === "action" && <ActionPanel result={result} />}
     </section>
-    <aside className="result-side"><section className="scenario-card-panel"><header><Lightbulb size={19} /><div><h3>해석과 근거</h3><p>점수는 선호 경향이지 성공 확률이 아닙니다.</p></div></header><div className="result-metric"><span>대화 근거 품질</span><strong>{qualityLabel}</strong></div><div className="evidence-counts"><span>사용자 진술 {result.evidenceQuality.factCount}</span><span>가정 {result.evidenceQuality.assumptionCount}</span><span>AI 추론 {result.evidenceQuality.inferenceCount}</span></div><p>필수 입력을 채웠다는 것과 실제 조건이 확인되었다는 것은 다릅니다. 비용·조건·가능 여부는 결정 전에 확인하세요.</p></section><section className="share-panel"><h3>공유 및 저장</h3><p>분석 결과 활용 기능은 다음 단계에서 연결할 수 있어요.</p><div><button type="button"><Save size={16} />결과 저장</button><button type="button"><Share2 size={16} />링크 공유</button><button type="button"><Download size={16} />PDF</button></div></section><section className="source-panel"><h3>응원하는 방식</h3><p>마음이 가는 방향의 기대 효과를 설명하되, 중요한 위험이나 부족한 근거를 숨기지 않습니다.</p></section></aside>
+    <aside className="result-side"><section className="scenario-card-panel"><header><Lightbulb size={19} /><div><h3>해석과 근거</h3><p>점수는 선호 경향이지 성공 확률이 아닙니다.</p></div></header><div className="result-metric"><span>대화 근거 품질</span><strong>{qualityLabel}</strong></div><div className="evidence-counts"><span>사용자 진술 {result.evidenceQuality.factCount}</span><span>가정 {result.evidenceQuality.assumptionCount}</span><span>AI 추론 {result.evidenceQuality.inferenceCount}</span></div><p>필수 입력을 채웠다는 것과 실제 조건이 확인되었다는 것은 다릅니다. 비용·조건·가능 여부는 결정 전에 확인하세요.</p></section><section className="share-panel"><h3>공유 및 저장</h3><p>결정 전체를 보관하거나 친구와 함께 살펴보세요.</p><div className="share-actions"><button type="button" onClick={saveAsPdf}><Download size={17} />PDF로 저장하기</button><button type="button" onClick={shareWithFriend}><Share2 size={17} />친구에게 공유하기</button></div>{shareStatus && <p className="share-status" role="status">{shareStatus}</p>}</section><section className="source-panel"><h3>응원하는 방식</h3><p>마음이 가는 방향의 기대 효과를 설명하되, 중요한 위험이나 부족한 근거를 숨기지 않습니다.</p></section></aside>
+    <PrintDecisionReport result={result} />
   </div>;
+}
+
+function PrintDecisionReport({ result }: { result: DecisionResult }) {
+  const encouraged = result.options.find((option) => option.id === result.guidance.encouragedOptionId)?.name;
+  return <section className="decision-print-report" aria-hidden="true">
+    <header className="print-report-header"><div className="print-report-brand"><span><CircleDot size={22} /><Sparkles size={14} /></span><strong>AI Decision Map</strong></div><small>결정 분석 보고서</small><h1>{result.title}</h1><p>선택지와 판단 기준, AI 해석과 다음 행동을 한 번에 정리했습니다.</p></header>
+    <section className="print-report-summary"><span>현재 응원 방향</span><h2>{encouraged ? `${encouraged} 쪽을 지지해요` : result.guidance.headline}</h2><p>{result.guidance.rationale}</p><strong>{result.guidance.encouragement}</strong></section>
+    <section className="print-report-section"><header><span>01</span><div><small>DECISION MAP</small><h2>결정 지도</h2></div></header><DecisionMapPanel result={result} /></section>
+    <section className="print-report-section"><header><span>02</span><div><small>COMPARISON</small><h2>비교 요약</h2></div></header><ComparisonPanel result={result} printMode /></section>
+    <section className="print-report-section"><header><span>03</span><div><small>AI INSIGHTS</small><h2>AI 인사이트</h2></div></header><InsightPanel result={result} /></section>
+    <section className="print-report-section"><header><span>04</span><div><small>ACTION PLAN</small><h2>액션 플랜</h2></div></header><ActionPanel result={result} /></section>
+    <footer>AI Decision Map · 점수는 선호 경향이며 실제 성공 확률을 의미하지 않습니다.</footer>
+  </section>;
 }
 
 function DecisionMapPanel({ result }: { result: DecisionResult }) {
   return <div className="map-panel"><DecisionMapGraph result={result} /><section className="map-alternative-summary"><header><span>대안별 핵심 해석</span><h3>지도에서 보이는 차이를 실제 선택 언어로 정리했어요</h3></header><div>{result.optionProfiles.map((profile) => { const option = result.options.find((item) => item.id === profile.optionId); const encouraged = profile.optionId === result.guidance.encouragedOptionId; return <article className={encouraged ? "encouraged" : ""} key={profile.optionId}><div><strong>{option?.name}</strong>{encouraged && <em>현재 응원 방향</em>}</div><p><b>선택할 이유</b>{profile.pros.slice(0,2).join(" · ")}</p><p><b>주의할 점</b>{profile.cons.slice(0,2).join(" · ")}</p></article>; })}</div></section></div>;
 }
 
-function ComparisonPanel({ result }: { result: DecisionResult }) {
+function ComparisonPanel({ result, printMode = false }: { result: DecisionResult; printMode?: boolean }) {
   const findAssessment = (criterionId: string, optionId: string) => result.assessments.find((item) => item.criterionId === criterionId && item.optionId === optionId);
-  return <div className="comparison-panel"><header><div><span>선택지 비교 테이블</span><h3>어떤 상황에 적합한지, 얻는 것과 감수할 것을 비교하세요.</h3></div></header><div className="option-profile-grid">{result.optionProfiles.map((profile) => { const option = result.options.find((item) => item.id === profile.optionId); return <article key={profile.optionId} className={profile.optionId === result.guidance.encouragedOptionId ? "encouraged" : ""}><header><strong>{option?.name}</strong>{profile.optionId === result.guidance.encouragedOptionId && <span>응원 방향</span>}</header><div><h4>이런 경우에 적합해요</h4><p>{profile.bestWhen}</p></div><div><h4>기대할 장점</h4>{profile.pros.map((item) => <p key={item}>+ {item}</p>)}</div><div><h4>확인할 부담</h4>{profile.cons.map((item) => <p key={item}>− {item}</p>)}</div></article>; })}</div><details className="score-details"><summary>참고 자료: 입력한 선호 점수 비교</summary><p>높을수록 사용자가 더 선호한다는 뜻입니다. 실제 비용·품질·성공 가능성을 측정한 수치는 아닙니다.</p><div className="table-wrap" tabIndex={0} role="region" aria-label="선호 점수 비교표 — 가로로 스크롤"><table><thead><tr><th>판단 기준</th>{result.options.map((option) => <th key={option.id}>{option.name}</th>)}<th>최대 차이</th></tr></thead><tbody>{result.criteria.map((criterion) => { const values = result.options.map((option) => findAssessment(criterion.id, option.id)?.score ?? 0); const delta = Math.max(...values) - Math.min(...values); return <tr key={criterion.id}><th>{criterion.name}<small>가중치 {Math.round(criterion.normalizedWeight * 100)}%</small></th>{result.options.map((option) => { const assessment = findAssessment(criterion.id, option.id); return <td key={option.id}><strong>{assessment?.score ?? "-"}점</strong><small>사용자 상대 평가</small></td>; })}<td><strong className="delta-score">{delta}점</strong><small>{delta >= 20 ? "결정에 큰 영향" : "차이가 작음"}</small></td></tr>; })}</tbody><tfoot><tr><th>종합 점수</th>{result.options.map((option) => <td key={option.id}><strong>{option.score ?? "-"}점</strong><small>{option.rank ? `${option.rank}순위` : "순위 없음"}</small></td>)}<td /></tr></tfoot></table></div>{result.scenarioForecasts.length > 0 && <ScenarioChart result={result} />}</details></div>;
+  return <div className="comparison-panel"><header><div><span>선택지 비교 테이블</span><h3>어떤 상황에 적합한지, 얻는 것과 감수할 것을 비교하세요.</h3></div></header><div className="option-profile-grid">{result.optionProfiles.map((profile) => { const option = result.options.find((item) => item.id === profile.optionId); return <article key={profile.optionId} className={profile.optionId === result.guidance.encouragedOptionId ? "encouraged" : ""}><header><strong>{option?.name}</strong>{profile.optionId === result.guidance.encouragedOptionId && <span>응원 방향</span>}</header><div><h4>이런 경우에 적합해요</h4><p>{profile.bestWhen}</p></div><div><h4>기대할 장점</h4>{profile.pros.map((item) => <p key={item}>+ {item}</p>)}</div><div><h4>확인할 부담</h4>{profile.cons.map((item) => <p key={item}>− {item}</p>)}</div></article>; })}</div><details className="score-details" open={printMode || undefined}><summary>참고 자료: 입력한 선호 점수 비교</summary><p>높을수록 사용자가 더 선호한다는 뜻입니다. 실제 비용·품질·성공 가능성을 측정한 수치는 아닙니다.</p><div className="table-wrap" tabIndex={0} role="region" aria-label="선호 점수 비교표 — 가로로 스크롤"><table><thead><tr><th>판단 기준</th>{result.options.map((option) => <th key={option.id}>{option.name}</th>)}<th>최대 차이</th></tr></thead><tbody>{result.criteria.map((criterion) => { const values = result.options.map((option) => findAssessment(criterion.id, option.id)?.score ?? 0); const delta = Math.max(...values) - Math.min(...values); return <tr key={criterion.id}><th>{criterion.name}<small>가중치 {Math.round(criterion.normalizedWeight * 100)}%</small></th>{result.options.map((option) => { const assessment = findAssessment(criterion.id, option.id); return <td key={option.id}><strong>{assessment?.score ?? "-"}점</strong><small>사용자 상대 평가</small></td>; })}<td><strong className="delta-score">{delta}점</strong><small>{delta >= 20 ? "결정에 큰 영향" : "차이가 작음"}</small></td></tr>; })}</tbody><tfoot><tr><th>종합 점수</th>{result.options.map((option) => <td key={option.id}><strong>{option.score ?? "-"}점</strong><small>{option.rank ? `${option.rank}순위` : "순위 없음"}</small></td>)}<td /></tr></tfoot></table></div>{result.scenarioForecasts.length > 0 && <ScenarioChart result={result} />}</details></div>;
 }
 
 function ScenarioChart({ result }: { result: DecisionResult }) {

@@ -246,6 +246,10 @@ button { color: inherit; }
 .share-panel div { margin-top: 13px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
 .share-panel button { min-height: 48px; padding: 5px; border: 1px solid #e4e0eb; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #706b78; background: #fff; cursor: pointer; font-size: 7px; }
 .share-panel button:hover { color: #6443d0; border-color: #bfafe8; }
+.share-panel .share-actions { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.share-panel .share-actions button { min-height: 58px; padding: 9px 7px; line-height: 1.35; }
+.share-panel .share-status { margin: 10px 0 0; padding: 8px 9px; border-radius: 8px; color: #41705d; background: #eef8f3; font-weight: 700; line-height: 1.4; }
+.decision-print-report { display: none; }
 .source-panel { display: grid; gap: 9px; }
 .source-panel h3 { margin-bottom: 3px; }
 .source-panel span { color: #8c8795; font-size: 8px; }
@@ -1198,5 +1202,49 @@ tfoot { background: #f5f6f8; }
   .stage-2 .collection-dock .composer { padding: 13px; border-radius: 18px; }
   .stage-2 .collection-dock .composer textarea { min-height: 72px; max-height: 120px; font-size: 1rem; line-height: 1.55; }
   .stage-2 .collection-dock .composer-footer button { width: 46px; height: 46px; }
-  .stage-2 .collection-dock .composer-footer > span { font-size: .7rem; }
+.stage-2 .collection-dock .composer-footer > span { font-size: .7rem; }
+}
+
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  html, body { width: 100%; min-width: 0; margin: 0; padding: 0; overflow: visible; background: #fff; }
+  .app-shell { display: block; min-height: 0; background: #fff; }
+  .app-sidebar, .stepper, .result-dashboard, .result-side, .workspace-footer, .nextjs-toast, [data-nextjs-toast] { display: none !important; }
+  .workspace, .result-layout { display: block; width: 100%; max-width: none; margin: 0; padding: 0; overflow: visible; }
+  .decision-print-report { display: block; color: #282431; font-family: Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  .print-report-header { position: relative; min-height: 160px; padding: 22px 26px; overflow: hidden; border: 1px solid #ded6f2; border-radius: 18px; background: linear-gradient(135deg,#faf7ff,#f0faf6); }
+  .print-report-header::after { position: absolute; width: 220px; height: 220px; right: -70px; top: -110px; border-radius: 50%; background: radial-gradient(circle,rgba(112,76,224,.2),transparent 70%); content: ""; }
+  .print-report-brand { display: flex; align-items: center; gap: 10px; color: #342d43; font-size: 17px; }
+  .print-report-brand > span { width: 38px; height: 38px; display: grid; place-items: center; position: relative; border-radius: 12px; color: #fff; background: linear-gradient(145deg,#8b76f3,#5d42d8); }
+  .print-report-brand svg + svg { position: absolute; right: -3px; top: -3px; color: #fff0a8; }
+  .print-report-header > small { display: block; margin-top: 24px; color: #6b4bd6; font-size: 9px; font-weight: 850; letter-spacing: .12em; }
+  .print-report-header h1 { margin: 7px 0 6px; font-size: 26px; line-height: 1.3; }
+  .print-report-header p { margin: 0; color: #716b7a; font-size: 11px; }
+  .print-report-summary { margin: 14px 0 18px; padding: 18px 22px; border-left: 5px solid #31a276; border-radius: 12px; background: #f1faf6; break-inside: avoid; }
+  .print-report-summary span { color: #237d5c; font-size: 9px; font-weight: 850; }
+  .print-report-summary h2 { margin: 5px 0; color: #1f7a59; font-size: 20px; }
+  .print-report-summary p, .print-report-summary strong { margin: 0; color: #5f5967; font-size: 10px; line-height: 1.6; }
+  .print-report-summary strong { display: block; margin-top: 7px; color: #493b6b; }
+  .print-report-section { margin-top: 18px; break-before: page; }
+  .print-report-section:first-of-type { break-before: auto; }
+  .print-report-section > header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #ded9e6; }
+  .print-report-section > header > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #6849d8; font-size: 9px; font-weight: 850; }
+  .print-report-section > header small { color: #8a7aa5; font-size: 7px; font-weight: 850; letter-spacing: .12em; }
+  .print-report-section > header h2 { margin: 1px 0 0; font-size: 18px; }
+  .decision-print-report .map-panel, .decision-print-report .comparison-panel, .decision-print-report .insight-grid, .decision-print-report .action-panel { padding: 0; }
+  .decision-print-report .decision-atlas { box-shadow: none; }
+  .decision-print-report .atlas-heading, .decision-print-report .atlas-verdict, .decision-print-report .atlas-map, .decision-print-report .atlas-evidence, .decision-print-report .atlas-metrics article, .decision-print-report .option-profile-grid article, .decision-print-report .insight-grid article, .decision-print-report .action-timeline article, .decision-print-report .decision-rules article { break-inside: avoid; }
+  .decision-print-report .atlas-layout { grid-template-columns: minmax(0,1fr); }
+  .decision-print-report .atlas-evidence { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 14px; }
+  .decision-print-report .atlas-evidence > h4, .decision-print-report .atlas-evidence > .atlas-evidence-tag, .decision-print-report .atlas-evidence > .atlas-tradeoff { grid-column: 1/-1; }
+  .decision-print-report .atlas-art { height: 250px; }
+  .decision-print-report .atlas-routes { bottom: 123px; }
+  .decision-print-report .atlas-origin { bottom: 103px; }
+  .decision-print-report .atlas-criterion-table { margin-top: -24px; }
+  .decision-print-report .map-alternative-summary { break-inside: avoid; }
+  .decision-print-report .score-details { display: block; }
+  .decision-print-report .table-wrap { overflow: visible; }
+  .decision-print-report .scenario-forecast { break-inside: avoid; }
+  .decision-print-report footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #ddd8e3; color: #817a89; font-size: 8px; text-align: center; }
 }

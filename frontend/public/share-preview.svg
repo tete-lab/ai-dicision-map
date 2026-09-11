@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="background" x1="70" y1="20" x2="1130" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.52" stop-color="#F5F1FF"/>
+      <stop offset="1" stop-color="#ECF9F4"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="82" y1="74" x2="144" y2="144" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8C78F5"/>
+      <stop offset="1" stop-color="#5B40D9"/>
+    </linearGradient>
+    <radialGradient id="purpleGlow"><stop stop-color="#CABBFF" stop-opacity=".72"/><stop offset="1" stop-color="#CABBFF" stop-opacity="0"/></radialGradient>
+    <radialGradient id="greenGlow"><stop stop-color="#AEE5D0" stop-opacity=".66"/><stop offset="1" stop-color="#AEE5D0" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="18" stdDeviation="15" flood-color="#5134C4" flood-opacity=".2"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#background)"/>
+  <circle cx="1075" cy="30" r="280" fill="url(#purpleGlow)"/>
+  <circle cx="590" cy="690" r="300" fill="url(#greenGlow)"/>
+  <rect x="76" y="70" width="72" height="72" rx="21" fill="url(#brand)" filter="url(#shadow)"/>
+  <circle cx="109" cy="107" r="16" fill="none" stroke="#FFFFFF" stroke-width="4"/>
+  <circle cx="109" cy="107" r="5" fill="#FFFFFF"/>
+  <path d="M139 76l2.4 7.1 7.1 2.4-7.1 2.4-2.4 7.1-2.4-7.1-7.1-2.4 7.1-2.4z" fill="#FFF0A8"/>
+  <text x="168" y="119" fill="#30283E" font-family="Arial, Apple SD Gothic Neo, sans-serif" font-size="35" font-weight="700">AI Decision Map</text>
+  <text x="78" y="260" fill="#6848D7" font-family="Arial, Apple SD Gothic Neo, sans-serif" font-size="23" font-weight="700" letter-spacing="3">TALK · MAP · DECIDE</text>
+  <text x="76" y="342" fill="#282238" font-family="Apple SD Gothic Neo, sans-serif" font-size="64" font-weight="700" letter-spacing="-3">고민을 선명한</text>
+  <text x="76" y="420" fill="#282238" font-family="Apple SD Gothic Neo, sans-serif" font-size="64" font-weight="700" letter-spacing="-3">결정 지도로 바꿔보세요</text>
+  <text x="78" y="477" fill="#6F687B" font-family="Apple SD Gothic Neo, sans-serif" font-size="27">선택지 비교부터 AI 인사이트와 실행 계획까지, 한 번에.</text>
+  <g transform="translate(914 328)">
+    <circle cx="118" cy="118" r="108" fill="none" stroke="#6848D7" stroke-opacity=".17" stroke-width="2"/>
+    <circle cx="118" cy="118" r="74" fill="none" stroke="#278E68" stroke-opacity=".24" stroke-width="2"/>
+    <path d="M20 132C60 82 82 160 118 118s66-25 98-70" fill="none" stroke="#8A70E8" stroke-width="4" stroke-linecap="round" stroke-dasharray="3 11"/>
+    <circle cx="118" cy="118" r="37" fill="#6848D7" filter="url(#shadow)"/>
+    <path d="M101 118l11 11 24-27" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="78" y="568" fill="#81788D" font-family="Arial, Apple SD Gothic Neo, sans-serif" font-size="20">ai-decision.tetelab.dev</text>
+</svg>
