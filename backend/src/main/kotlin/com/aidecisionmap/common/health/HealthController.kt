@@ -11,11 +11,13 @@ class HealthController {
     fun health(): HealthResponse = HealthResponse(
         status = "UP",
         service = "ai-decision-map-api",
+        release = "2026.10.20.1",
     )
 }
 
 data class HealthResponse(
     val status: String,
     val service: String,
+    val release: String,
 )
 
